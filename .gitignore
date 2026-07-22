@@ -1,0 +1,8 @@
+node_modules/
+.next/
+build/
+*.o
+*.db-journal
+*.db-wal
+*.log
+.env

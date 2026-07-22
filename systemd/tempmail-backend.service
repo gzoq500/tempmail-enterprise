@@ -1,0 +1,17 @@
+[Unit]
+Description=TempMail C++ Backend Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/tempmail/backend
+ExecStart=/opt/tempmail/backend/build/tempmail-server --port 3001 --domain routerssh.web.id
+Restart=always
+RestartSec=3
+Environment=TEMPMAIL_PORT=3001
+Environment=TEMPMAIL_DOMAIN=routerssh.web.id
+Environment=TEMPMAIL_DB=/opt/tempmail/backend/data/tempmail.db
+
+[Install]
+WantedBy=multi-user.target
