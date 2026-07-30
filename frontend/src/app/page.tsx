@@ -24,10 +24,22 @@ function extractHtmlFromMime(raw: string): string {
   // Remove noscript/xml
   cleaned = cleaned.replace(/<noscript>[\s\S]*?<\/noscript>/gi, '');
   cleaned = cleaned.replace(/<xml>[\s\S]*?<\/xml>/gi, '');
+  // Strip conditional comment DELIMITERS but KEEP content inside
+  // <!--[if mso]> ... <![endif]--> = remove entirely (Outlook VML)
+  cleaned = cleaned.replace(/<!--\[if\s*mso[^>]*>[\s\S]*?<!\[endif\]-->/gi, '');
+  // <!--[if !mso]><!--> ... <!--<![endif]--> = strip delimiters, keep content
+  cleaned = cleaned.replace(/<!--\[if\s*!mso[^>]*><!--\s*>?/gi, '');
+  cleaned = cleaned.replace(/<!--\s*<!\[endif\]-->/gi, '');
+  // <!--[if lte mso ...]> ... <![endif]--> = remove entirely
+  cleaned = cleaned.replace(/<!--\[if\s*lte[^>]*>[\s\S]*?\[endif\]-->/gi, '');
+  // Remove remaining IE conditional comments
+  cleaned = cleaned.replace(/<!--\[if[^>]*>[\s\S]*?<!\[endif\]-->/gi, '');
   // Remove mso-hide from inline styles
   cleaned = cleaned.replace(/mso-hide:\s*all[^;]*;?/gi, '');
   // Override small heights on buttons
   cleaned = cleaned.replace(/height:\s*17px/gi, 'height: auto');
+  // Remove VML namespace tags (not rendered in modern browsers)
+  cleaned = cleaned.replace(/<\/?[vw]:[^>]*>/gi, '');
   return cleaned.trim();
 }
 
