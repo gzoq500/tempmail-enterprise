@@ -120,6 +120,8 @@ const emailStyles = `
   .email-html-content [style*="background-color:#FAF9F5"], .email-html-content [style*="background:#FAF9F5"] { background: transparent !important; }
   .email-html-content div[lang] { background: transparent !important; }
   .email-html-content [style*="mso-hide"] { display: block !important; visibility: visible !important; height: auto !important; }
+  .email-html-content a[style*="background"] { display: inline-block !important; height: auto !important; min-height: 40px; visibility: visible !important; }
+  .email-html-content .default-button, .email-html-content [data-btn] { display: inline-block !important; height: auto !important; min-height: 40px; visibility: visible !important; }
   .email-html-content img[width="1"][height="1"], .email-html-content img[style*="height:1px"] { display: none !important; }
   .email-html-content noscript, .email-html-content xml, .email-html-content <!--[if { display: none !important; }
   @media (prefers-color-scheme: dark) {
