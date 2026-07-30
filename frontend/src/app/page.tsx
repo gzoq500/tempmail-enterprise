@@ -142,18 +142,13 @@ function ChangeEmailModal({ domain, onClose, onApply }: { domain: string; onClos
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleRandom = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/alias', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      const data = await res.json();
-      if (data.email) {
-        const user = data.email.split('@')[0];
-        onApply(user);
-        onClose();
-      }
-    } catch {}
-    setLoading(false);
+  const handleRandom = () => {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    const names = ['andi','budi','citra','dewi','eko','fajar','gilang','hadi','indra','joko','kurnia','lukman','maman','nanda','opik','pratama','rahmat','sandi','taufik','udin','vicky','wahyu','yusuf','zainal','bayu','candra','dian','erwin','fauzi','gunawan'];
+    const name = names[Math.floor(Math.random() * names.length)];
+    let suffix = '';
+    for (let i = 0; i < 3; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
+    setUsername(name + suffix);
   };
 
   const handleApply = () => {
