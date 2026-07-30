@@ -207,16 +207,21 @@ function EmailDetail({ email, onBack }: { email: Email; onBack: () => void }) {
       <style dangerouslySetInnerHTML={{ __html: emailStyles }} />
       <div className="bg-white dark:bg-gray-900 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700/50" style={{overflowWrap:'break-word',wordBreak:'break-word'}}>
         {(() => {
-          const html = extractHtmlFromMime(email.body_html || '');
-          const text = email.body_text || '';
-          if (html && html.trim().startsWith('<')) {
-            return <div dangerouslySetInnerHTML={{ __html: html }} className="email-html-content" />;
+          try {
+            const html = extractHtmlFromMime(email.body_html || '');
+            const text = email.body_text || '';
+            if (html && html.trim().startsWith('<')) {
+              return <div dangerouslySetInnerHTML={{ __html: html }} className="email-html-content" />;
+            }
+            const clean = decodeQuotedPrintable(html || text);
+            if (clean) {
+              return <div className="p-4 text-gray-800 dark:text-gray-200 text-sm" dangerouslySetInnerHTML={{ __html: linkifyText(clean.replace(/\n/g, '<br/>').replace(/\r/g, '')) }} />;
+            }
+            return <div className="p-4 text-gray-500 italic">(Kosong)</div>;
+          } catch (err) {
+            const raw = email.body_text || email.body_html || '';
+            return <div className="p-4 text-gray-800 dark:text-gray-200 text-sm" style={{whiteSpace:'pre-wrap'}}>{raw.substring(0, 2000)}</div>;
           }
-          const clean = decodeQuotedPrintable(html || text);
-          if (clean) {
-            return <div className="p-4 text-gray-800 dark:text-gray-200 text-sm" dangerouslySetInnerHTML={{ __html: linkifyText(clean.replace(/\n/g, '<br/>').replace(/\r/g, '')) }} />;
-          }
-          return <div className="p-4 text-gray-500 italic">(Kosong)</div>;
         })()}
       </div>
     </div>
