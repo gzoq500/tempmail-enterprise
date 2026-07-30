@@ -262,6 +262,13 @@ void TempMailServer::start() {
             // Always decode quoted-printable (=3D, soft breaks)
             clean_html = quoted_printable_decode(clean_html);
             clean_body = quoted_printable_decode(clean_body);
+            // Remove mso-hide from inline styles (unhides buttons)
+            while (clean_html.find("mso-hide") != std::string::npos) {
+                auto pos = clean_html.find("mso-hide");
+                auto end = clean_html.find(";", pos);
+                if (end != std::string::npos) clean_html.erase(pos, end - pos + 1);
+                else clean_html.erase(pos);
+            }
 int id = db_.store_email(alias->id, from, to, subject, clean_body, clean_html);
             std::cout << "[INCOMING] " << from << " -> " << to << " (" << subject << ") id=" << id << std::endl;
 
