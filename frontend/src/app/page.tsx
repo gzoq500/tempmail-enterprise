@@ -25,7 +25,7 @@ function extractHtmlFromMime(raw: string): string {
       .replace(/<noscript>[\s\S]*?<\/noscript>/gi, '')
       .replace(/<xml>[\s\S]*?<\/xml>/gi, '')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<!--\[if\s*mso[^>]*>[\s\S]*?<!\[endif\]-->/gi, '').replace(/<!--\[if\s*[^>]*IE[^>]*>[\s\S]*?<!\[endif\]-->/gi, '').replace(/<!--\[if\s*lte[^>]*>[\s\S]*?\[endif\]-->/gi, '').replace(/<!--\[if\s*!mso\]><!-->/gi, '').replace(/<!--<!\[endif\]-->/gi, '')
       .replace(/<img[^>]*(?:width=\"1\"|height=\"1\")[^>]*>/gi, '')
       .replace(/^\s+/, '');
     return cleaned;
@@ -43,7 +43,7 @@ function extractHtmlFromMime(raw: string): string {
       .replace(/<!--\[if[^>]*>[\s\S]*?<!\[endif\]-->/gi, '')
       .replace(/<!--\[if[^>]*>[\s\S]*?\[endif\]-->/gi, '')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<!--\[if\s*mso[^>]*>[\s\S]*?<!\[endif\]-->/gi, '').replace(/<!--\[if\s*[^>]*IE[^>]*>[\s\S]*?<!\[endif\]-->/gi, '').replace(/<!--\[if\s*lte[^>]*>[\s\S]*?\[endif\]-->/gi, '').replace(/<!--\[if\s*!mso\]><!-->/gi, '').replace(/<!--<!\[endif\]-->/gi, '')
       .replace(/<img[^>]*(?:width=\"1\"|height=\"1\")[^>]*>/gi, '')
       .replace(/^\s+/, '');
   }
