@@ -6,3 +6,4 @@ build/
 *.db-wal
 *.log
 .env
+tempmail.db

@@ -3,6 +3,59 @@
 #include <algorithm>
 #include <regex>
 
+// Base64 decode
+static const std::string B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string base64_decode(const std::string& input) {
+    std::string result;
+    std::vector<int> T(256, -1);
+    for (int i = 0; i < 64; i++) T[B64_CHARS[i]] = i;
+
+    int val = 0, valb = -8;
+    for (unsigned char c : input) {
+        if (c == '=' || c == '\r' || c == '\n' || c == ' ') continue;
+        if (T[c] == -1) continue;
+        val = (val << 6) + T[c];
+        valb += 6;
+        if (valb >= 0) {
+            result.push_back(char((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+    return result;
+}
+
+// Quoted-printable decode
+std::string quoted_printable_decode(const std::string& input) {
+    std::string result;
+    for (size_t i = 0; i < input.size(); i++) {
+        if (input[i] == '=' && i + 2 < input.size()) {
+            // Soft line break: =\r\n or =\n
+            if (input[i+1] == '\r' && input[i+2] == '\n') {
+                i += 2;
+            } else if (input[i+1] == '\n') {
+                i += 1;
+            } else {
+                // Only decode =XX where XX are UPPERCASE hex (standard QP)
+                char h1 = input[i+1], h2 = input[i+2];
+                bool isHex = ((h1>='0'&&h1<='9')||(h1>='A'&&h1<='F')) &&
+                             ((h2>='0'&&h2<='9')||(h2>='A'&&h2<='F'));
+                if (isHex) {
+                    std::string hex = input.substr(i+1, 2);
+                    char c = (char)std::stoi(hex, nullptr, 16);
+                    result.push_back(c);
+                    i += 2;
+                } else {
+                    result.push_back(input[i]);
+                }
+            }
+        } else {
+            result.push_back(input[i]);
+        }
+    }
+    return result;
+}
+
 std::string extract_email_address(const std::string& header_value) {
     std::regex email_regex("<([^>]+)>");
     std::smatch match;
@@ -16,31 +69,46 @@ std::string extract_email_address(const std::string& header_value) {
     return header_value;
 }
 
+// Decode content based on Content-Transfer-Encoding header
+std::string decode_content(const std::string& headers, const std::string& content) {
+    std::string lower_headers = headers;
+    std::transform(lower_headers.begin(), lower_headers.end(), lower_headers.begin(), ::tolower);
+    
+    if (lower_headers.find("content-transfer-encoding: base64") != std::string::npos) {
+        return base64_decode(content);
+    } else if (lower_headers.find("content-transfer-encoding: quoted-printable") != std::string::npos) {
+        return quoted_printable_decode(content);
+    }
+    return content;
+}
+
 std::string extract_html_body(const std::string& body) {
-    // Find HTML part in MIME message
-    std::regex html_regex("Content-Type: text/html[^\\r\\n]*\\r?\\n\\r?\\n([\\s\\S]*?)(?:--[0-9a-f]+|$)");
+    // Find HTML part in MIME message - capture headers + content
+    std::regex html_regex("(Content-Type: text/html[^\\r\\n]*(?:\\r?\\n(?!\\r?\\n)[^\\r\\n]*)*)\\r?\\n\\r?\\n([\\s\\S]*?)(?:--[0-9a-zA-Z_+=/-]+|$)");
     std::smatch match;
     if (std::regex_search(body, match, html_regex)) {
-        std::string html = match[1].str();
+        std::string headers = match[1].str();
+        std::string html = match[2].str();
         // Trim trailing whitespace
         while (!html.empty() && (html.back() == '\r' || html.back() == '\n' || html.back() == ' ')) {
             html.pop_back();
         }
-        return html;
+        return decode_content(headers, html);
     }
     return "";
 }
 
 std::string extract_text_body(const std::string& body) {
-    // Find text/plain part in MIME message
-    std::regex text_regex("Content-Type: text/plain[^\\r\\n]*\\r?\\n\\r?\\n([\\s\\S]*?)(?:--[0-9a-f]+|$)");
+    // Find text/plain part in MIME message - capture headers + content
+    std::regex text_regex("(Content-Type: text/plain[^\\r\\n]*(?:\\r?\\n(?!\\r?\\n)[^\\r\\n]*)*)\\r?\\n\\r?\\n([\\s\\S]*?)(?:--[0-9a-zA-Z_+=/-]+|$)");
     std::smatch match;
     if (std::regex_search(body, match, text_regex)) {
-        std::string text = match[1].str();
+        std::string headers = match[1].str();
+        std::string text = match[2].str();
         while (!text.empty() && (text.back() == '\r' || text.back() == '\n' || text.back() == ' ')) {
             text.pop_back();
         }
-        return text;
+        return decode_content(headers, text);
     }
     return "";
 }

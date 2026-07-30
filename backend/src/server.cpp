@@ -1,4 +1,5 @@
 #include "server.h"
+#include "email_parser.h"
 #include "database.h"
 #include "httplib.h"
 #include "json.hpp"
@@ -59,8 +60,44 @@ void TempMailServer::start() {
         return httplib::Server::HandlerResponse::Unhandled;
     });
 
-    // POST /api/alias - Generate new alias
-    svr.Post("/api/alias", [this](const httplib::Request&, httplib::Response& res) {
+    // POST /api/alias - Generate new alias (random or custom)
+    svr.Post("/api/alias", [this](const httplib::Request& req, httplib::Response& res) {
+        // Check if custom email provided
+        std::string custom_email;
+        if (req.has_param("email")) {
+            custom_email = req.get_param_value("email");
+        } else if (!req.body.empty()) {
+            try {
+                auto j = json::parse(req.body);
+                if (j.contains("email")) {
+                    custom_email = j["email"].get<std::string>();
+                }
+            } catch (...) {}
+        }
+
+        // Custom alias
+        if (!custom_email.empty()) {
+            // Validate format
+            if (custom_email.find("@") == std::string::npos || custom_email.find("@") == 0) {
+                custom_email = custom_email + "@" + domain_;
+            }
+            // Check if exists
+            if (db_.get_alias(custom_email).has_value()) {
+                res.status = 409;
+                res.set_content(R"({"error":"Alias already exists"})", "application/json");
+                return;
+            }
+            auto now = std::chrono::system_clock::now() + std::chrono::hours(24);
+            auto time = std::chrono::system_clock::to_time_t(now);
+            std::ostringstream oss;
+            oss << std::put_time(std::gmtime(&time), "%Y-%m-%dT%H:%M:%SZ");
+            auto a = db_.create_alias(custom_email, oss.str());
+            json j = {{"id", a.id}, {"email", a.email}, {"expires_at", a.expires_at}};
+            res.set_content(j.dump(), "application/json");
+            return;
+        }
+
+        // Random alias (original logic)
         for (int i = 0; i < 10; ++i) {
             std::string alias = generate_alias();
             std::string email = alias + "@" + domain_;
@@ -189,14 +226,46 @@ void TempMailServer::start() {
                 return;
             }
 
+            // Write ALL incoming emails to admin mbox for Roundcube
+            std::string mbox = "/var/mail/admin";
+            FILE* f = fopen(mbox.c_str(), "a");
+            if (f) {
+                time_t now = time(nullptr);
+                struct tm* t = gmtime(&now);
+                char datebuf[64];
+                strftime(datebuf, sizeof(datebuf), "%a %b %d %H:%M:%S %Y", t);
+                fprintf(f, "From %s %s\n", from.c_str(), datebuf);
+                fprintf(f, "From: %s\n", from.c_str());
+                fprintf(f, "To: %s\n", to.c_str());
+                fprintf(f, "Subject: %s\n", subject.c_str());
+                fprintf(f, "Content-Type: text/plain; charset=UTF-8\n");
+                fprintf(f, "\n%s\n\n", body.c_str());
+                fclose(f);
+            }
+
             auto alias = db_.get_alias(to);
             if (!alias) {
                 res.set_content(R"({"success":true,"message":"No matching alias"})", "application/json");
                 return;
             }
 
-            int id = db_.store_email(alias->id, from, to, subject, body, html);
+            // Clean MIME content before storing
+            std::string clean_body = clean_mime_body(body);
+            std::string clean_html = html.empty() ? clean_body : clean_mime_body(html);
+            // Also try to extract HTML specifically if body has MIME structure
+            if (clean_body.find("Content-Type:") != std::string::npos) {
+                std::string extracted_html = extract_html_body(body);
+                if (!extracted_html.empty()) clean_html = extracted_html;
+                std::string extracted_text = extract_text_body(body);
+                if (!extracted_text.empty()) clean_body = extracted_text;
+            }
+            // Always decode quoted-printable (=3D, soft breaks)
+            clean_html = quoted_printable_decode(clean_html);
+            clean_body = quoted_printable_decode(clean_body);
+int id = db_.store_email(alias->id, from, to, subject, clean_body, clean_html);
             std::cout << "[INCOMING] " << from << " -> " << to << " (" << subject << ") id=" << id << std::endl;
+
+
             res.set_content(R"({"success":true})", "application/json");
         } catch (const std::exception& e) {
             res.status = 400;
