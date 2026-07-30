@@ -24,7 +24,7 @@ function extractHtmlFromMime(raw: string): string {
   // Remove noscript/xml
   cleaned = cleaned.replace(/<noscript>[\s\S]*?<\/noscript>/gi, '');
   cleaned = cleaned.replace(/<xml>[\s\S]*?<\/xml>/gi, '');
-  // Strip MSO conditional comments entirely (VML blocks)
+  // Strip MSO conditional comments entirely
   cleaned = cleaned.replace(/<!--\[if\s*mso[^>]*>[\s\S]*?<!\[endif\]-->/gi, '');
   // Strip !mso delimiters, KEEP content inside
   cleaned = cleaned.replace(/<!--\[if\s*!mso[^>]*><!--\s*>?/gi, '');
@@ -41,6 +41,9 @@ function extractHtmlFromMime(raw: string): string {
   cleaned = cleaned.replace(/height:\s*17px/gi, 'height: auto');
   // Remove VML namespace tags
   cleaned = cleaned.replace(/<\/?[vw]:[^>]*>/gi, '');
+  // CRITICAL: Remove background-color from body/div tags (prevents white-on-white)
+  cleaned = cleaned.replace(/background-color:\s*#(?:ffffff|faf9f5|f5f5f5)[^;]*;?/gi, '');
+  cleaned = cleaned.replace(/background:\s*#(?:ffffff|faf9f5|f5f5f5)[^;]*;?/gi, '');
   // Force white text on buttons with background color
   cleaned = cleaned.replace(/(background-color:\s*#[0-9a-f]+[^"]*color:)\s*#[0-9a-f]+/gi, '$1 #ffffff');
   return cleaned.trim();
