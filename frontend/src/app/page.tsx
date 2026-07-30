@@ -15,42 +15,20 @@ function decodeQuotedPrintable(input: string): string {
 function extractHtmlFromMime(raw: string): string {
   if (!raw) return '';
   let cleaned = raw.trim();
-  // Already clean HTML
-  if (cleaned.startsWith('<') || cleaned.startsWith('<!')) {
-    // Strip head section, conditional comments, tracking pixels, XML blocks
-    cleaned = cleaned
-      .replace(/<head>[\s\S]*?<\/head>/gi, '')
-      .replace(/<!--\[if[^>]*>[\s\S]*?<!\[endif\]-->/gi, '')
-      .replace(/<!--\[if[^>]*>[\s\S]*?\[endif\]-->/gi, '')
-      .replace(/<noscript>[\s\S]*?<\/noscript>/gi, '')
-      .replace(/<xml>[\s\S]*?<\/xml>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<!--\[if\s*mso[^>]*>[\s\S]*?<!\[endif\]-->/gi, '').replace(/<!--\[if\s*[^>]*IE[^>]*>[\s\S]*?<!\[endif\]-->/gi, '').replace(/<!--\[if\s*lte[^>]*>[\s\S]*?\[endif\]-->/gi, '').replace(/<!--\[if\s*!mso\]><!-->/gi, '').replace(/<!--<!\[endif\]-->/gi, '')
-      .replace(/<img[^>]*(?:width=\"1\"|height=\"1\")[^>]*>/gi, '')
-      .replace(/^\s+/, '');
-    return cleaned;
-  }
-  // Find text/html part from MIME
-  const htmlMatch = raw.match(/Content-Type:\s*text\/html[^\r\n]*\r?\n\r?\n([\s\S]*?)(?:--[0-9a-zA-Z_+=\/-]+|$)/i);
-  if (htmlMatch) {
-    let html = htmlMatch[1].trim();
-    const partHeaders = htmlMatch[0].substring(0, htmlMatch[0].indexOf('\n\n') + 2);
-    if (/content-transfer-encoding:\s*base64/i.test(partHeaders)) {
-      try { html = atob(html.replace(/\s/g, '')); } catch {}
-    }
-    html = decodeQuotedPrintable(html);
-    return html.replace(/<head>[\s\S]*?<\/head>/gi, '')
-      .replace(/<!--\[if[^>]*>[\s\S]*?<!\[endif\]-->/gi, '')
-      .replace(/<!--\[if[^>]*>[\s\S]*?\[endif\]-->/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<!--\[if\s*mso[^>]*>[\s\S]*?<!\[endif\]-->/gi, '').replace(/<!--\[if\s*[^>]*IE[^>]*>[\s\S]*?<!\[endif\]-->/gi, '').replace(/<!--\[if\s*lte[^>]*>[\s\S]*?\[endif\]-->/gi, '').replace(/<!--\[if\s*!mso\]><!-->/gi, '').replace(/<!--<!\[endif\]-->/gi, '')
-      .replace(/<img[^>]*(?:width=\"1\"|height=\"1\")[^>]*>/gi, '')
-      .replace(/^\s+/, '');
-  }
-  // Find text/plain part
-  const textMatch = raw.match(/Content-Type:\s*text\/plain[^\r\n]*\r?\n\r?\n([\s\S]*?)(?:--[0-9a-zA-Z_+=\/-]+|$)/i);
-  if (textMatch) return decodeQuotedPrintable(textMatch[1].trim());
-  return decodeQuotedPrintable(raw);
+  // Remove head section
+  cleaned = cleaned.replace(/<head>[\s\S]*?<\/head>/gi, '');
+  // Remove style tags
+  cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  // Remove tracking pixels
+  cleaned = cleaned.replace(/<img[^>]*(?:width=\"1\"|height=\"1\"|height:1px)[^>]*>/gi, '');
+  // Remove noscript/xml
+  cleaned = cleaned.replace(/<noscript>[\s\S]*?<\/noscript>/gi, '');
+  cleaned = cleaned.replace(/<xml>[\s\S]*?<\/xml>/gi, '');
+  // Remove mso-hide from inline styles
+  cleaned = cleaned.replace(/mso-hide:\s*all[^;]*;?/gi, '');
+  // Override small heights on buttons
+  cleaned = cleaned.replace(/height:\s*17px/gi, 'height: auto');
+  return cleaned.trim();
 }
 
 // Helper: make URLs clickable in text
