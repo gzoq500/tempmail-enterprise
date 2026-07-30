@@ -24,22 +24,25 @@ function extractHtmlFromMime(raw: string): string {
   // Remove noscript/xml
   cleaned = cleaned.replace(/<noscript>[\s\S]*?<\/noscript>/gi, '');
   cleaned = cleaned.replace(/<xml>[\s\S]*?<\/xml>/gi, '');
-  // Strip conditional comment DELIMITERS but KEEP content inside
-  // <!--[if mso]> ... <![endif]--> = remove entirely (Outlook VML)
+  // Strip MSO conditional comments entirely (VML blocks)
   cleaned = cleaned.replace(/<!--\[if\s*mso[^>]*>[\s\S]*?<!\[endif\]-->/gi, '');
-  // <!--[if !mso]><!--> ... <!--<![endif]--> = strip delimiters, keep content
+  // Strip !mso delimiters, KEEP content inside
   cleaned = cleaned.replace(/<!--\[if\s*!mso[^>]*><!--\s*>?/gi, '');
   cleaned = cleaned.replace(/<!--\s*<!\[endif\]-->/gi, '');
-  // <!--[if lte mso ...]> ... <![endif]--> = remove entirely
+  // Strip lte mso comments
   cleaned = cleaned.replace(/<!--\[if\s*lte[^>]*>[\s\S]*?\[endif\]-->/gi, '');
-  // Remove remaining IE conditional comments
+  // Strip remaining IE conditional comments
   cleaned = cleaned.replace(/<!--\[if[^>]*>[\s\S]*?<!\[endif\]-->/gi, '');
+  // Remove stray --> from partial comment stripping
+  cleaned = cleaned.replace(/\s*-->\s*/g, ' ');
   // Remove mso-hide from inline styles
   cleaned = cleaned.replace(/mso-hide:\s*all[^;]*;?/gi, '');
   // Override small heights on buttons
   cleaned = cleaned.replace(/height:\s*17px/gi, 'height: auto');
-  // Remove VML namespace tags (not rendered in modern browsers)
+  // Remove VML namespace tags
   cleaned = cleaned.replace(/<\/?[vw]:[^>]*>/gi, '');
+  // Force white text on buttons with background color
+  cleaned = cleaned.replace(/(background-color:\s*#[0-9a-f]+[^"]*color:)\s*#[0-9a-f]+/gi, '$1 #ffffff');
   return cleaned.trim();
 }
 
