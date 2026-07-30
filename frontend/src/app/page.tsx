@@ -119,7 +119,7 @@ const emailStyles = `
   .email-html-content a[style*="background"] { display: inline-block !important; height: auto !important; min-height: 40px; visibility: visible !important; }
   .email-html-content .default-button, .email-html-content [data-btn] { display: inline-block !important; height: auto !important; min-height: 40px; visibility: visible !important; }
   .email-html-content img[width="1"][height="1"], .email-html-content img[style*="height:1px"] { display: none !important; }
-  .email-html-content noscript, .email-html-content xml, .email-html-content <!--[if { display: none !important; }
+  .email-html-content noscript, .email-html-content xml { display: none !important; }
   @media (prefers-color-scheme: dark) {
     .email-html-content { color: #e5e5e5; }
     .email-html-content img { opacity: 0.95; }
