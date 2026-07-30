@@ -214,7 +214,25 @@ function EmailDetail({ email, onBack }: { email: Email; onBack: () => void }) {
             const html = extractHtmlFromMime(email.body_html || '');
             const text = email.body_text || '';
             if (html && html.trim().startsWith('<')) {
-              return <div dangerouslySetInnerHTML={{ __html: html }} className="email-html-content" />;
+              // Strip HTML tags, decode entities, linkify URLs
+            const stripped = html
+              .replace(/<br\s*\/?/gi, '\n')
+              .replace(/<\/p>/gi, '\n\n')
+              .replace(/<\/div>/gi, '\n')
+              .replace(/<tr[^>]*>/gi, '\n')
+              .replace(/<[^>]*>/g, '')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&nbsp;/g, ' ')
+              .trim();
+            if (stripped) {
+              const linked = stripped
+                .replace(/\n/g, '<br/>')
+                .replace(/(https?:\/\/[^\s<"']+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:underline;">$1</a>');
+              return <div className="p-4 text-gray-800 dark:text-gray-200 text-sm" style={{whiteSpace:'pre-wrap',lineHeight:'1.6'}} dangerouslySetInnerHTML={{ __html: linked }} />;
+            }
+            return <div className="p-4 text-gray-500 italic">(Kosong)</div>;
             }
             const clean = decodeQuotedPrintable(html || text);
             if (clean) {
