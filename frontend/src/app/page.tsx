@@ -42,8 +42,8 @@ function extractHtmlFromMime(raw: string): string {
   // Remove VML namespace tags
   cleaned = cleaned.replace(/<\/?[vw]:[^>]*>/gi, '');
   // CRITICAL: Remove background-color from body/div tags (prevents white-on-white)
-  cleaned = cleaned.replace(/background-color:\s*#(?:ffffff|faf9f5|f5f5f5)[^;]*;?/gi, '');
-  cleaned = cleaned.replace(/background:\s*#(?:ffffff|faf9f5|f5f5f5)[^;]*;?/gi, '');
+  cleaned = cleaned.replace(/background-color:\s*#(?:fff|ffffff|faf9f5|f5f5f5|f2f4f6|f8f9fa|f0f0f0)[^;]*;?/gi, '');
+  cleaned = cleaned.replace(/background:\s*#(?:fff|ffffff|faf9f5|f5f5f5|f2f4f6|f8f9fa|f0f0f0)[^;]*;?/gi, '');
   // Force white text on buttons with background color
   cleaned = cleaned.replace(/(background-color:\s*#[0-9a-f]+[^"]*color:)\s*#[0-9a-f]+/gi, '$1 #ffffff');
   return cleaned.trim();
