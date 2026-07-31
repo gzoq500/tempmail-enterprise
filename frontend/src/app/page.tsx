@@ -211,39 +211,29 @@ function EmailDetail({ email, onBack }: { email: Email; onBack: () => void }) {
       <div className="bg-white dark:bg-gray-900 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700/50" style={{overflowWrap:'break-word',wordBreak:'break-word'}}>
         {(() => {
           try {
-            const html = extractHtmlFromMime(email.body_html || '');
-            const text = email.body_text || '';
-            if (html && html.trim().startsWith('<')) {
-              // Strip HTML tags, decode entities, linkify URLs
-            const stripped = html
-              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-              .replace(/<head>[\s\S]*?<\/head>/gi, '')
-              .replace(/<br\s*\/?/gi, '\n')
-              .replace(/<\/p>/gi, '\n\n')
-              .replace(/<\/div>/gi, '\n')
-              .replace(/<tr[^>]*>/gi, '\n')
-              .replace(/<[^>]*>/g, '')
-              .replace(/&amp;/g, '&')
-              .replace(/&lt;/g, '<')
-              .replace(/&gt;/g, '>')
-              .replace(/&nbsp;/g, ' ')
-              .replace(/[ \t]{2,}/g, ' ')
-              .replace(/\n[ \t]+/g, '\n')
-              .replace(/[ \t]+\n/g, '\n')
-              .replace(/\n{3,}/g, '\n\n')
-              .trim();
-            if (stripped) {
-              const linked = stripped
-                .replace(/\n/g, '<br/>')
-                .replace(/(https?:\/\/[^\s<"']+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:underline;">$1</a>');
+            // Use body_text if it's clean text, otherwise strip HTML from it
+            let text = email.body_text || '';
+            const hasHtml = text.includes('<') && (text.includes('<html') || text.includes('<body') || text.includes('<div') || text.includes('<!DOCTYPE'));
+            if (hasHtml) {
+              // Old email: body_text contains raw HTML, strip it
+              text = text
+                .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                .replace(/<head>[\s\S]*?<\/head>/gi, '')
+                .replace(/<br\s*\/?/gi, '\n')
+                .replace(/<\/p>/gi, '\n\n')
+                .replace(/<\/div>/gi, '\n')
+                .replace(/<tr[^>]*>/gi, '\n')
+                .replace(/<[^>]*>/g, '')
+                .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+                .replace(/=\r?\n/g, '')
+                .replace(/\n{3,}/g, '\n\n')
+                .replace(/[ \t]{2,}/g, ' ')
+                .trim();
+            }
+            if (text && text.length > 10) {
+              const linked = linkifyText(text.replace(/\r/g, '').replace(/\n/g, '<br/>'));
               return <div className="p-4 text-gray-800 dark:text-gray-200 text-sm" style={{whiteSpace:'pre-wrap',lineHeight:'1.6'}} dangerouslySetInnerHTML={{ __html: linked }} />;
-            }
-            return <div className="p-4 text-gray-500 italic">(Kosong)</div>;
-            }
-            const clean = decodeQuotedPrintable(html || text);
-            if (clean) {
-              return <div className="p-4 text-gray-800 dark:text-gray-200 text-sm" dangerouslySetInnerHTML={{ __html: linkifyText(clean.replace(/\n/g, '<br/>').replace(/\r/g, '')) }} />;
             }
             return <div className="p-4 text-gray-500 italic">(Kosong)</div>;
           } catch (err) {

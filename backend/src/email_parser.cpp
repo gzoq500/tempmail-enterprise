@@ -183,3 +183,75 @@ ParsedEmail parse_email(const std::string& raw_email) {
 
     return result;
 }
+
+// Remove <style>, <script>, <head> blocks
+std::string strip_style_blocks(const std::string& html) {
+    std::string result = html;
+    std::regex style_re("<style[^>]*>[\\s\\S]*?</style>", std::regex::icase);
+    result = std::regex_replace(result, style_re, "");
+    std::regex script_re("<script[^>]*>[\\s\\S]*?</script>", std::regex::icase);
+    result = std::regex_replace(result, script_re, "");
+    std::regex head_re("<head>[\\s\\S]*?</head>", std::regex::icase);
+    result = std::regex_replace(result, head_re, "");
+    // Remove conditional comments
+    std::regex mso_re("<!--[\\s\\S]*?-->");
+    result = std::regex_replace(result, mso_re, "");
+    return result;
+}
+
+// Strip all HTML tags, decode common entities, convert <br>/<p>/<div> to newlines
+std::string strip_html_tags(const std::string& html) {
+    std::string result = strip_style_blocks(html);
+    
+    // Convert block elements to newlines BEFORE stripping tags
+    std::regex br_re("<br\\s*/?>", std::regex::icase);
+    result = std::regex_replace(result, br_re, "\n");
+    std::regex p_re("</p>", std::regex::icase);
+    result = std::regex_replace(result, p_re, "\n\n");
+    std::regex div_re("</div>", std::regex::icase);
+    result = std::regex_replace(result, div_re, "\n");
+    std::regex tr_re("<tr[^>]*>", std::regex::icase);
+    result = std::regex_replace(result, tr_re, "\n");
+    std::regex li_re("</li>", std::regex::icase);
+    result = std::regex_replace(result, li_re, "\n");
+    
+    // Strip all remaining HTML tags
+    std::regex tag_re("<[^>]*>");
+    result = std::regex_replace(result, tag_re, "");
+    
+    // Decode common HTML entities
+    auto replace_all = [](std::string& s, const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+            s.replace(pos, from.length(), to);
+            pos += to.length();
+        }
+    };
+    replace_all(result, "&amp;", "&");
+    replace_all(result, "&lt;", "<");
+    replace_all(result, "&gt;", ">");
+    replace_all(result, "&quot;", "\"");
+    replace_all(result, "&#39;", "'");
+    replace_all(result, "&nbsp;", " ");
+    
+    // Clean up whitespace
+    // Collapse multiple spaces
+    std::regex multi_space("[ \\t]{2,}");
+    result = std::regex_replace(result, multi_space, " ");
+    // Remove leading whitespace from lines
+    std::regex lead_space("\\n[ \\t]+");
+    result = std::regex_replace(result, lead_space, "\n");
+    // Collapse 3+ newlines to 2
+    std::regex multi_newline("\\n{3,}");
+    result = std::regex_replace(result, multi_newline, "\n\n");
+    
+    // Trim
+    while (!result.empty() && (result.back() == '\n' || result.back() == '\r' || result.back() == ' ')) {
+        result.pop_back();
+    }
+    while (!result.empty() && (result.front() == '\n' || result.front() == '\r' || result.front() == ' ')) {
+        result.erase(0, 1);
+    }
+    
+    return result;
+}

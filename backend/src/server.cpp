@@ -269,6 +269,15 @@ void TempMailServer::start() {
                 if (end != std::string::npos) clean_html.erase(pos, end - pos + 1);
                 else clean_html.erase(pos);
             }
+            // Strip HTML from body_text so frontend always has clean text
+            clean_body = strip_html_tags(clean_body);
+            // Also generate stripped version of HTML for body_text fallback
+            if (clean_html.find("<") != std::string::npos) {
+                std::string stripped = strip_html_tags(clean_html);
+                if (stripped.length() > clean_body.length()) {
+                    clean_body = stripped;  // Use richer content from HTML
+                }
+            }
 int id = db_.store_email(alias->id, from, to, subject, clean_body, clean_html);
             std::cout << "[INCOMING] " << from << " -> " << to << " (" << subject << ") id=" << id << std::endl;
 

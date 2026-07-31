@@ -17,3 +17,5 @@ std::string decode_content(const std::string& headers, const std::string& conten
 std::string extract_html_body(const std::string& body);
 std::string extract_text_body(const std::string& body);
 std::string clean_mime_body(const std::string& body);
+std::string strip_style_blocks(const std::string& html);
+std::string strip_html_tags(const std::string& html);
