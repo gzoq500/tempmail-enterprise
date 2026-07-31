@@ -216,6 +216,9 @@ function EmailDetail({ email, onBack }: { email: Email; onBack: () => void }) {
             if (html && html.trim().startsWith('<')) {
               // Strip HTML tags, decode entities, linkify URLs
             const stripped = html
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+              .replace(/<head>[\s\S]*?<\/head>/gi, '')
               .replace(/<br\s*\/?/gi, '\n')
               .replace(/<\/p>/gi, '\n\n')
               .replace(/<\/div>/gi, '\n')
@@ -225,6 +228,10 @@ function EmailDetail({ email, onBack }: { email: Email; onBack: () => void }) {
               .replace(/&lt;/g, '<')
               .replace(/&gt;/g, '>')
               .replace(/&nbsp;/g, ' ')
+              .replace(/[ \t]{2,}/g, ' ')
+              .replace(/\n[ \t]+/g, '\n')
+              .replace(/[ \t]+\n/g, '\n')
+              .replace(/\n{3,}/g, '\n\n')
               .trim();
             if (stripped) {
               const linked = stripped
