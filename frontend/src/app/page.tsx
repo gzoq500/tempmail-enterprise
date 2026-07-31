@@ -229,6 +229,7 @@ function EmailDetail({ email, onBack }: { email: Email; onBack: () => void }) {
                 .replace(/=\r?\n/g, '')
                 .replace(/\n{3,}/g, '\n\n')
                 .replace(/[ \t]{2,}/g, ' ')
+                .replace(/\r/g, '')
                 .trim();
             }
             if (text && text.length > 10) {
