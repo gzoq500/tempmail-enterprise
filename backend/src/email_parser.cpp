@@ -215,6 +215,10 @@ std::string strip_html_tags(const std::string& html) {
     std::regex li_re("</li>", std::regex::icase);
     result = std::regex_replace(result, li_re, "\n");
     
+    // Preserve links: convert <a href="URL">text</a> to "text [URL]"
+    std::regex link_re("<a[^>]*href=\"([^\"]*)\"[^>]*>([^<]*)</a>", std::regex::icase);
+    result = std::regex_replace(result, link_re, "$2 [$1]");
+
     // Strip all remaining HTML tags
     std::regex tag_re("<[^>]*>");
     result = std::regex_replace(result, tag_re, "");
