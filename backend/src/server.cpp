@@ -215,8 +215,8 @@ void TempMailServer::start() {
         try {
             auto j = json::parse(req.body);
             std::string to = j.value("to", "");
-            std::string from = j.value("from", "unknown");
-            std::string subject = j.value("subject", "(No subject)");
+            std::string from = decode_mime_header(j.value("from", "unknown"));
+            std::string subject = decode_mime_header(j.value("subject", "(No subject)"));
             std::string body = j.value("body", "");
             std::string html = j.value("html", "");
 
@@ -249,34 +249,45 @@ void TempMailServer::start() {
                 return;
             }
 
-            // Clean MIME content before storing
-            std::string clean_body = clean_mime_body(body);
-            std::string clean_html = html.empty() ? clean_body : clean_mime_body(html);
-            // Also try to extract HTML specifically if body has MIME structure
-            if (clean_body.find("Content-Type:") != std::string::npos) {
-                std::string extracted_html = extract_html_body(body);
-                if (!extracted_html.empty()) clean_html = extracted_html;
-                std::string extracted_text = extract_text_body(body);
-                if (!extracted_text.empty()) clean_body = extracted_text;
+            // ── STORE RAW BODY FIRST (never lose data) ──
+            std::string raw_stored = body;
+            
+            // ── Extract MIME parts ──
+            std::string html_part = extract_html_body(body);
+            std::string text_part = extract_text_body(body);
+            
+            // ── body_html: best HTML we can find ──
+            std::string clean_html;
+            if (!html_part.empty()) {
+                clean_html = html_part;
+            } else if (body.find("<html") != std::string::npos || body.find("<body") != std::string::npos || body.find("<!DOCTYPE") != std::string::npos) {
+                clean_html = body; // Raw body IS html
+            } else if (!html.empty() && html.find("<") != std::string::npos) {
+                clean_html = html;
             }
-            // Always decode quoted-printable (=3D, soft breaks)
             clean_html = quoted_printable_decode(clean_html);
-            clean_body = quoted_printable_decode(clean_body);
-            // Remove mso-hide from inline styles (unhides buttons)
-            while (clean_html.find("mso-hide") != std::string::npos) {
-                auto pos = clean_html.find("mso-hide");
-                auto end = clean_html.find(";", pos);
-                if (end != std::string::npos) clean_html.erase(pos, end - pos + 1);
-                else clean_html.erase(pos);
+            
+            // ── body_text: best plain text we can find ──
+            std::string clean_body;
+            if (!text_part.empty()) {
+                clean_body = strip_html_tags(text_part);
             }
-            // Strip HTML from body_text so frontend always has clean text
-            clean_body = strip_html_tags(clean_body);
-            // Also generate stripped version of HTML for body_text fallback
-            if (clean_html.find("<") != std::string::npos) {
+            if (clean_body.length() < 20 && !clean_html.empty()) {
                 std::string stripped = strip_html_tags(clean_html);
-                if (stripped.length() > clean_body.length()) {
-                    clean_body = stripped;  // Use richer content from HTML
-                }
+                if (stripped.length() > clean_body.length()) clean_body = stripped;
+            }
+            if (clean_body.empty() && !body.empty()) {
+                clean_body = strip_html_tags(body);
+            }
+            clean_body = quoted_printable_decode(clean_body);
+            
+            // ── Final: if html is empty but body has HTML, use raw body ──
+            if (clean_html.empty() && clean_body.find("<") != std::string::npos) {
+                clean_html = clean_body;
+            }
+            // ── NEVER store empty html when we have raw body ──
+            if (clean_html.empty() && !raw_stored.empty() && raw_stored.find("<") != std::string::npos) {
+                clean_html = raw_stored;
             }
 int id = db_.store_email(alias->id, from, to, subject, clean_body, clean_html);
             std::cout << "[INCOMING] " << from << " -> " << to << " (" << subject << ") id=" << id << std::endl;

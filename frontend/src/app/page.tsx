@@ -3,60 +3,139 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { generateAlias, getAliases, getEmails, getEmail, deleteAlias, checkNewEmails, type Alias, type Email } from '@/lib/api';
 
-// Helper: decode quoted-printable in frontend
-function decodeQuotedPrintable(input: string): string {
-  return input
-    .replace(/=\r\n/g, '')
-    .replace(/=\n/g, '')
-    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+// ─── Format sender name (clean display) ───
+function formatSender(raw: string): string {
+  if (!raw) return 'Unknown';
+  let s = raw.trim();
+  // Decode MIME encoded words: =?charset?encoding?data?=
+  s = s.replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_, charset, enc, data) => {
+    try {
+      if (enc === 'B' || enc === 'b') {
+        return atob(data);
+      } else {
+        // Q encoding: _ = space, =XX = hex
+        return data.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+      }
+    } catch { return data; }
+  });
+  // Extract display name: "Name" <email> or Name <email>
+  const nameMatch = s.match(/^"?([^"<]+?)"?\s*</);
+  if (nameMatch) {
+    const name = nameMatch[1].trim();
+    if (name.length > 0 && name.length < 60) return name;
+  }
+  // Extract email from <email> format
+  const emailMatch = s.match(/<([^>]+)>/);
+  if (emailMatch) return emailMatch[1];
+  return s;
 }
 
-// Helper: extract HTML from raw MIME body
-function extractHtmlFromMime(raw: string): string {
+// ─── Email Content Sanitizer (handles ALL email formats) ───
+function sanitizeEmailHtml(raw: string): string {
   if (!raw) return '';
-  let cleaned = raw.trim();
-  // Remove head section
-  cleaned = cleaned.replace(/<head>[\s\S]*?<\/head>/gi, '');
-  // Remove style tags
-  cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-  // Remove tracking pixels
-  cleaned = cleaned.replace(/<img[^>]*(?:width=\"1\"|height=\"1\"|height:1px)[^>]*>/gi, '');
-  // Remove noscript/xml
-  cleaned = cleaned.replace(/<noscript>[\s\S]*?<\/noscript>/gi, '');
-  cleaned = cleaned.replace(/<xml>[\s\S]*?<\/xml>/gi, '');
-  // Strip MSO conditional comments entirely
-  cleaned = cleaned.replace(/<!--\[if\s*mso[^>]*>[\s\S]*?<!\[endif\]-->/gi, '');
-  // Strip !mso delimiters, KEEP content inside
-  cleaned = cleaned.replace(/<!--\[if\s*!mso[^>]*><!--\s*>?/gi, '');
-  cleaned = cleaned.replace(/<!--\s*<!\[endif\]-->/gi, '');
-  // Strip lte mso comments
-  cleaned = cleaned.replace(/<!--\[if\s*lte[^>]*>[\s\S]*?\[endif\]-->/gi, '');
-  // Strip remaining IE conditional comments
-  cleaned = cleaned.replace(/<!--\[if[^>]*>[\s\S]*?<!\[endif\]-->/gi, '');
-  // Remove stray --> from partial comment stripping
-  cleaned = cleaned.replace(/\s*-->\s*/g, ' ');
-  // Remove mso-hide from inline styles
-  cleaned = cleaned.replace(/mso-hide:\s*all[^;]*;?/gi, '');
-  // Override small heights on buttons
-  cleaned = cleaned.replace(/height:\s*17px/gi, 'height: auto');
-  // Remove VML namespace tags
-  cleaned = cleaned.replace(/<\/?[vw]:[^>]*>/gi, '');
-  // CRITICAL: Remove background-color from body/div tags (prevents white-on-white)
-  cleaned = cleaned.replace(/background-color:\s*#(?:fff|ffffff|faf9f5|f5f5f5|f2f4f6|f8f9fa|f0f0f0)[^;]*;?/gi, '');
-  cleaned = cleaned.replace(/background:\s*#(?:fff|ffffff|faf9f5|f5f5f5|f2f4f6|f8f9fa|f0f0f0)[^;]*;?/gi, '');
-  // Force white text on buttons with background color
-  cleaned = cleaned.replace(/(background-color:\s*#[0-9a-f]+[^"]*color:)\s*#[0-9a-f]+/gi, '$1 #ffffff');
-  return cleaned.trim();
+  let h = raw.trim();
+
+  // 1. Remove dangerous elements only
+  h = h.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+  h = h.replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '');
+  h = h.replace(/<xml[^>]*>[\s\S]*?<\/xml>/gi, '');
+  h = h.replace(/<form[^>]*>[\s\S]*?<\/form>/gi, '');
+  h = h.replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '');
+  h = h.replace(/<object[^>]*>[\s\S]*?<\/object>/gi, '');
+  h = h.replace(/<embed[^>]*>/gi, '');
+
+  // 2. Remove ALL HTML comments (MSO conditionals + regular comments)
+  h = h.replace(/<!--[\s\S]*?-->/g, '');
+
+  // 3. Remove VML namespace tags (Outlook)
+  h = h.replace(/<\/?[vw]:[^>]*>/gi, '');
+
+  // 4. Unhide mso-hide elements
+  h = h.replace(/mso-hide:\s*all[^;"]*;?/gi, '');
+
+  // 5. Remove 1x1 tracking pixels
+  h = h.replace(/<img[^>]*(?:width="?1"?|height="?1"?)[^>]*>/gi, '');
+  h = h.replace(/<img[^>]*style="[^"]*height:\s*1px[^"]*"[^>]*>/gi, '');
+
+  // 6. Extract body content if full HTML document (greedy match for truncated HTML)
+  const bodyMatch = h.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  if (bodyMatch) {
+    h = bodyMatch[1];
+  } else if (h.includes('<body')) {
+    // Truncated HTML: extract everything after <body>
+    const bodyStart = h.match(/<body[^>]*>([\s\S]*)/i);
+    if (bodyStart) h = bodyStart[1];
+  }
+
+  return h.trim() || raw.trim(); // Never return empty if input had content
 }
 
-// Helper: make URLs clickable in text
-function linkifyText(text: string): string {
-  return text.replace(/(https?:\/\/[^\s<>"']+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline;word-break:break-all;">$1</a>');
+// ─── Render email content (unified for ALL formats) ───
+function renderEmailContent(email: Email): { html: string; isHtml: boolean } {
+  const rawHtml = (email.body_html || '').trim();
+  const rawText = (email.body_text || '').trim();
+
+  // PRIORITY 1: body_html has HTML content → render as HTML
+  if (rawHtml && rawHtml.length > 5) {
+    const cleaned = sanitizeEmailHtml(rawHtml);
+    if (cleaned.length > 0) {
+      return { html: cleaned, isHtml: true };
+    }
+    // Even if sanitize returned empty, try raw HTML (truncated emails)
+    if (/<[a-z]/i.test(rawHtml)) {
+      return { html: rawHtml, isHtml: true };
+    }
+  }
+
+  // PRIORITY 2: body_text has HTML content (old emails)
+  if (rawText && /<[a-z][\s\S]*>/i.test(rawText)) {
+    const hasHtmlTags = /<html|<body|<div|<table|<p[\s>]|<!DOCTYPE/i.test(rawText);
+    if (hasHtmlTags) {
+      const cleaned = sanitizeEmailHtml(rawText);
+      if (cleaned.length > 0) return { html: cleaned, isHtml: true };
+    }
+  }
+
+  // PRIORITY 3: body_text has plain text content
+  if (rawText && rawText.length > 0) {
+    const escaped = rawText
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n');
+    const linked = escaped.replace(
+      /(https?:\/\/[^\s<>"']+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#1a73e8;word-break:break-all;">$1</a>'
+    );
+    return { html: linked, isHtml: false };
+  }
+
+  // PRIORITY 4: body_html exists but was stripped to empty → show raw
+  if (rawHtml && rawHtml.length > 0) {
+    return { html: rawHtml, isHtml: true };
+  }
+
+  return { html: '', isHtml: false };
 }
 
+// ─── CSS for HTML email rendering ───
+const emailStyles = `
+.email-body { max-width:100%; overflow-x:auto; word-wrap:break-word; overflow-wrap:break-word; background:#fff; color:#000; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:1.5; }
+.email-body * { max-width:100% !important; box-sizing:border-box; }
+.email-body img { max-width:100% !important; height:auto !important; }
+.email-body a { color:#1a73e8 !important; }
+.email-body table { max-width:100% !important; border-collapse:collapse; }
+.email-body td, .email-body th { max-width:100% !important; word-wrap:break-word; overflow-wrap:break-word; }
+.email-body button, .email-body [role="button"] { cursor:pointer; }
+.email-body img[width="1"][height="1"] { display:none !important; }
+.email-body [style*="mso-hide"] { display:block !important; visibility:visible !important; height:auto !important; }
+.email-body a[style*="background"] { display:inline-block !important; height:auto !important; min-height:36px; visibility:visible !important; }
+.email-text { background:#fff; color:#000; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:1.6; white-space:pre-wrap; word-wrap:break-word; overflow-wrap:break-word; padding:16px; }
+.email-text a { color:#1a73e8; word-break:break-all; }
+`;
 
-
-// Send Email Modal
+// ─── Send Email Modal ───
 function SendEmailModal({ aliases, onClose, onSuccess }: { aliases: Alias[]; onClose: () => void; onSuccess: () => void }) {
   const [from, setFrom] = useState(aliases[0]?.email || '');
   const [name, setName] = useState('');
@@ -102,31 +181,7 @@ function SendEmailModal({ aliases, onClose, onSuccess }: { aliases: Alias[]; onC
   );
 }
 
-// Email rendering styles
-const emailStyles = `
-  .email-html-content { max-width: 100%; overflow-x: auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #1a1a1a; }
-  .email-html-content * { max-width: 100% !important; box-sizing: border-box; }
-  .email-html-content img { max-width: 100% !important; height: auto !important; border-radius: 8px; }
-  .email-html-content a { color: #2563eb !important; text-decoration: underline; word-break: break-all; }
-  .email-html-content table { max-width: 100% !important; border-collapse: collapse; }
-  .email-html-content td, .email-html-content th { max-width: 100% !important; word-wrap: break-word; overflow-wrap: break-word; padding: 4px 8px; }
-  .email-html-content p { margin: 8px 0; }
-  .email-html-content h1, .email-html-content h2, .email-html-content h3 { margin: 16px 0 8px; }
-  .email-html-content button, .email-html-content [role="button"] { cursor: pointer; }
-  .email-html-content [style*="background-color:#FAF9F5"], .email-html-content [style*="background:#FAF9F5"] { background: transparent !important; }
-  .email-html-content div[lang] { background: transparent !important; }
-  .email-html-content [style*="mso-hide"] { display: block !important; visibility: visible !important; height: auto !important; }
-  .email-html-content a[style*="background"] { display: inline-block !important; height: auto !important; min-height: 40px; visibility: visible !important; }
-  .email-html-content .default-button, .email-html-content [data-btn] { display: inline-block !important; height: auto !important; min-height: 40px; visibility: visible !important; }
-  .email-html-content img[width="1"][height="1"], .email-html-content img[style*="height:1px"] { display: none !important; }
-  .email-html-content noscript, .email-html-content xml { display: none !important; }
-  @media (prefers-color-scheme: dark) {
-    .email-html-content { color: #e5e5e5; }
-    .email-html-content img { opacity: 0.95; }
-  }
-`;
-
-// Copy Toast
+// ─── Copy Toast ───
 function CopyToast({ show }: { show: boolean }) {
   if (!show) return null;
   return (
@@ -139,8 +194,7 @@ function CopyToast({ show }: { show: boolean }) {
   );
 }
 
-
-// Change Email Modal
+// ─── Change Email Modal ───
 function ChangeEmailModal({ domain, onClose, onApply }: { domain: string; onClose: () => void; onApply: (username: string) => void }) {
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
@@ -169,16 +223,8 @@ function ChangeEmailModal({ domain, onClose, onApply }: { domain: string; onClos
           </button>
         </div>
         <div className="space-y-3">
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="username (or leave empty)"
-            className="input w-full"
-          />
-          <div className="flex items-center gap-2 px-3 py-2.5 bg-gray-800/50 border border-gray-700/50 rounded-xl text-sm text-gray-400 font-mono">
-            @{domain}
-          </div>
+          <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username (or leave empty)" className="input w-full" />
+          <div className="flex items-center gap-2 px-3 py-2.5 bg-gray-800/50 border border-gray-700/50 rounded-xl text-sm text-gray-400 font-mono">@{domain}</div>
         </div>
         <div className="flex gap-3 mt-5">
           <button onClick={handleRandom} disabled={loading} className="flex-1 px-4 py-2.5 bg-gray-800/80 hover:bg-gray-700 text-gray-200 text-sm font-medium rounded-xl border border-gray-700/50 transition-all">
@@ -194,8 +240,10 @@ function ChangeEmailModal({ domain, onClose, onApply }: { domain: string; onClos
   );
 }
 
-// Email Detail
+// ─── Email Detail ───
 function EmailDetail({ email, onBack }: { email: Email; onBack: () => void }) {
+  const { html, isHtml } = renderEmailContent(email);
+
   return (
     <div className="p-4">
       <button onClick={onBack} className="flex items-center gap-2 text-purple-400 hover:text-purple-300 mb-4 transition-colors">
@@ -203,51 +251,27 @@ function EmailDetail({ email, onBack }: { email: Email; onBack: () => void }) {
         Kembali
       </button>
       <div className="border-b border-gray-800 pb-4 mb-4">
-        <div className="text-sm text-gray-500 mb-1">Dari: <span className="text-gray-300">{email.from_address}</span></div>
-        <h2 className="text-xl font-bold text-gray-100">{email.subject || '(Tanpa subjek)'}</h2>
+        <div className="text-sm text-gray-500 mb-1">Dari: <span className="text-gray-300 break-all">{formatSender(email.from_address)}</span></div>
+        <h2 className="text-lg font-bold text-gray-100">{email.subject || '(Tanpa subjek)'}</h2>
         <div className="text-xs text-gray-500 mt-1">{new Date(email.received_at).toLocaleString('id-ID', { weekday: 'long', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long', year: 'numeric' })}</div>
       </div>
       <style dangerouslySetInnerHTML={{ __html: emailStyles }} />
-      <div className="bg-white dark:bg-gray-900 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700/50" style={{overflowWrap:'break-word',wordBreak:'break-word'}}>
-        {(() => {
-          try {
-            // Use body_text if it's clean text, otherwise strip HTML from it
-            let text = email.body_text || '';
-            const hasHtml = text.includes('<') && (text.includes('<html') || text.includes('<body') || text.includes('<div') || text.includes('<!DOCTYPE'));
-            if (hasHtml) {
-              // Old email: body_text contains raw HTML, strip it
-              text = text
-                .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-                .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-                .replace(/<head>[\s\S]*?<\/head>/gi, '')
-                .replace(/<br\s*\/?/gi, '\n')
-                .replace(/<\/p>/gi, '\n\n')
-                .replace(/<\/div>/gi, '\n')
-                .replace(/<tr[^>]*>/gi, '\n')
-                .replace(/<[^>]*>/g, '')
-                .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
-                .replace(/=\r?\n/g, '')
-                .replace(/\n{3,}/g, '\n\n')
-                .replace(/[ \t]{2,}/g, ' ')
-                .replace(/\r/g, '')
-                .trim();
-            }
-            if (text && text.length > 10) {
-              const linked = linkifyText(text.replace(/\r/g, '').replace(/\n/g, '<br/>'));
-              return <div className="p-4 text-gray-800 dark:text-gray-200 text-sm" style={{whiteSpace:'pre-wrap',lineHeight:'1.6'}} dangerouslySetInnerHTML={{ __html: linked }} />;
-            }
-            return <div className="p-4 text-gray-500 italic">(Kosong)</div>;
-          } catch (err) {
-            const raw = email.body_text || email.body_html || '';
-            return <div className="p-4 text-gray-800 dark:text-gray-200 text-sm" style={{whiteSpace:'pre-wrap'}}>{raw.substring(0, 2000)}</div>;
-          }
-        })()}
+      <div className="rounded-xl border border-gray-200" style={{ background: '#fff', overflow: 'auto', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
+        {html ? (
+          isHtml ? (
+            <div className="email-body" style={{ padding: '16px' }} dangerouslySetInnerHTML={{ __html: html }} />
+          ) : (
+            <div className="email-text" dangerouslySetInnerHTML={{ __html: html }} />
+          )
+        ) : (
+          <div className="p-4 text-gray-400 italic">(Kosong)</div>
+        )}
       </div>
     </div>
   );
 }
 
-// Main Page
+// ─── Main Page ───
 export default function Home() {
   const [aliases, setAliases] = useState<any[]>([]);
   const [activeAlias, setActiveAlias] = useState<Alias | null>(null);
@@ -275,27 +299,14 @@ export default function Home() {
 
   const handleGenerate = async () => { setLoading(true); try { const alias = await generateAlias(); setActiveAlias(alias); setSelectedEmail(null); setEmails([]); setLastEmailId(0); loadAliases(); loadEmails(alias.email); } catch (err) { console.error(err); } setLoading(false); };
   const handleCopyEmail = () => { if (!activeAlias) return; navigator.clipboard.writeText(activeAlias.email); setShowToast(true); setTimeout(() => setShowToast(false), 2000); };
-  const handleRefresh = () => {
-    if (activeAlias) {
-      setRefreshing(true);
-      loadEmails(activeAlias.email);
-      setTimeout(() => setRefreshing(false), 800);
-    }
-  };
+  const handleRefresh = () => { if (activeAlias) { setRefreshing(true); loadEmails(activeAlias.email); setTimeout(() => setRefreshing(false), 800); } };
   const handleApplyCustomEmail = async (username: string) => {
     setLoading(true);
     try {
       const email = username ? `${username}@${emailDomain}` : '';
       const res = await fetch('/api/alias', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: email ? JSON.stringify({email}) : '{}' });
       const data = await res.json();
-      if (data.email) {
-        setActiveAlias(data);
-        setSelectedEmail(null);
-        setEmails([]);
-        setLastEmailId(0);
-        loadAliases();
-        loadEmails(data.email);
-      }
+      if (data.email) { setActiveAlias(data); setSelectedEmail(null); setEmails([]); setLastEmailId(0); loadAliases(); loadEmails(data.email); }
     } catch (err) { console.error(err); }
     setLoading(false);
   };
@@ -310,9 +321,7 @@ export default function Home() {
           <div className="absolute top-20 right-1/4 w-64 h-64 bg-blue-500/5 rounded-full blur-2xl" />
         </div>
         <div className="relative z-10 px-4">
-          <h1 className="text-4xl md:text-5xl font-bold mb-3">
-            <span className="gradient-text">TempMail</span>
-          </h1>
+          <h1 className="text-4xl md:text-5xl font-bold mb-3"><span className="gradient-text">TempMail</span></h1>
           <p className="text-lg text-gray-300 mb-2">Email Sementara</p>
           <p className="text-sm text-gray-500 max-w-md mx-auto mb-6">Lindungi privasi Anda dengan email sementara. Generate email random, terima pesan langsung, tanpa registrasi.</p>
           {!activeAlias && (
@@ -328,31 +337,25 @@ export default function Home() {
         {/* Active Email Card */}
         {activeAlias && (
           <div className="card overflow-hidden">
-            {/* Email Header */}
             <div className="flex items-center justify-between px-4 py-2.5 bg-gray-800/80 border-b border-gray-700/50">
               <span className="text-sm font-mono text-purple-300 truncate">{activeAlias.email}</span>
               <button onClick={handleCopyEmail} className="text-gray-400 hover:text-white transition-colors" title="Copy">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
               </button>
             </div>
-            {/* 2x2 Button Grid */}
             <div className="grid grid-cols-2 gap-px bg-gray-700/50 m-4 rounded-xl overflow-hidden">
-              {/* Change */}
               <button onClick={() => setShowChangeModal(true)} className="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200">
                 <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 Change
               </button>
-              {/* Copy */}
               <button onClick={handleCopyEmail} className="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200">
                 <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                 Copy
               </button>
-              {/* Delete */}
               <button onClick={() => handleDeleteAlias(activeAlias.email)} className="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200">
                 <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                 Delete
               </button>
-              {/* Refresh */}
               <button onClick={handleRefresh} className="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200">
                 <svg className={`w-4 h-4 text-gray-400 ${refreshing ? "animate-spin-continuous" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 Refresh
@@ -361,7 +364,7 @@ export default function Home() {
           </div>
         )}
 
-      {/* Kirim Email */}
+        {/* Kirim Email */}
         {activeAlias && (
           <button onClick={() => setShowSendModal(true)} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 text-gray-200 font-medium rounded-xl border border-gray-700/50 transition-all duration-200">
             <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
@@ -369,7 +372,7 @@ export default function Home() {
           </button>
         )}
 
-        {/* Inbox Section */}
+        {/* Inbox */}
         {activeAlias && (
           <div className="card overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
@@ -387,7 +390,6 @@ export default function Home() {
                   <div className="w-20 h-20 bg-gray-800/50 rounded-2xl flex items-center justify-center">
                     <svg className="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
                   </div>
-                  <svg className="absolute -bottom-1 -right-1 w-8 h-8 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 </div>
                 <p className="font-bold text-gray-400 text-lg">Belum ada email</p>
                 <p className="text-gray-600 text-sm mt-1">Email yang masuk akan muncul di sini</p>
@@ -398,7 +400,7 @@ export default function Home() {
                   <div key={email.id} onClick={() => setSelectedEmail(email)} className="flex items-start gap-3 p-4 hover:bg-gray-800/30 cursor-pointer transition-colors">
                     <div className={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${email.is_read ? 'bg-gray-600' : 'bg-purple-400'}`} />
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-gray-200 text-sm truncate">{email.from_address}</div>
+                      <div className="font-semibold text-gray-200 text-sm truncate">{formatSender(email.from_address)}</div>
                       <div className="text-gray-400 text-sm truncate">{email.subject || '(Tanpa subjek)'}</div>
                       <div className="text-gray-600 text-xs mt-1">{new Date(email.received_at).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}</div>
                     </div>

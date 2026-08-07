@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""TempMail Email Handler v5 - Bulletproof for ALL email formats."""
+import sys
+import json
+import re
+import urllib.request
+
+API_URL = "http://localhost:3001/api/incoming"
+
+def extract_header(raw: str, name: str) -> str:
+    """Extract header value, handling multi-line folded headers (RFC 2822)."""
+    pattern = rf'^{re.escape(name)}:\s*(.*?)(?:\n(?![ \t])|\Z)'
+    match = re.search(pattern, raw, re.MULTILINE | re.IGNORECASE)
+    if not match:
+        return ""
+    value = match.group(1).replace('\r\n', '\n').replace('\r', '\n')
+    value = re.sub(r'\n[ \t]+', ' ', value).strip()
+    return value
+
+def extract_email_address(header: str) -> str:
+    """Extract email address from From/To header."""
+    m = re.search(r'<([^>]+)>', header)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', header)
+    if m:
+        return m.group(0).lower()
+    return header.strip()
+
+def get_body(raw: str) -> str:
+    """Get body after headers. Handle both \\n\\n and \\r\\n\\r\\n."""
+    # Find the blank line that separates headers from body
+    # Must be at the START of a line (not inside a header value)
+    lines = raw.split('\n')
+    header_end = -1
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == '' and i > 0:
+            header_end = i
+            break
+    if header_end == -1:
+        return ""
+    return '\n'.join(lines[header_end + 1:])
+
+def main():
+    raw = sys.stdin.read()
+    if not raw.strip():
+        return
+
+    from_header = extract_header(raw, "From")
+    to_header = extract_header(raw, "To")
+    subject = extract_header(raw, "Subject")
+    to_email = extract_email_address(to_header)
+    body = get_body(raw)
+
+    if not body.strip():
+        return
+
+    payload = json.dumps({
+        "from": from_header,
+        "to": to_email,
+        "subject": subject,
+        "body": body,
+        "html": ""
+    }, ensure_ascii=False)
+
+    try:
+        req = urllib.request.Request(
+            API_URL,
+            data=payload.encode('utf-8'),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            pass
+    except Exception:
+        pass
+
+if __name__ == "__main__":
+    main()
