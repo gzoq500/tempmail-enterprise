@@ -13,7 +13,6 @@ function formatSender(raw: string): string {
       if (enc === 'B' || enc === 'b') {
         return atob(data);
       } else {
-        // Q encoding: _ = space, =XX = hex
         return data.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
       }
     } catch { return data; }
@@ -26,8 +25,51 @@ function formatSender(raw: string): string {
   }
   // Extract email from <email> format
   const emailMatch = s.match(/<([^>]+)>/);
-  if (emailMatch) return emailMatch[1];
-  return s;
+  const addr = emailMatch ? emailMatch[1] : s;
+  // Clean up bounce/noreply addresses → extract brand name from domain
+  const domain = addr.split('@')[1] || '';
+  if (domain) {
+    // Known domain → brand mappings
+    const known: Record<string, string> = {
+      'amazonses.com': 'Amazon', 'amazon.com': 'Amazon',
+      'google.com': 'Google', 'googlemail.com': 'Google',
+      'github.com': 'GitHub', 'gitlab.com': 'GitLab',
+      'shopify.com': 'Shopify', 'mailer.shopify.com': 'Shopify',
+      'netflix.com': 'Netflix', 'facebook.com': 'Facebook',
+      'microsoft.com': 'Microsoft', 'outlook.com': 'Microsoft',
+      'apple.com': 'Apple', 'twitter.com': 'Twitter',
+      'slack.com': 'Slack', 'discord.com': 'Discord',
+      'stripe.com': 'Stripe', 'paypal.com': 'PayPal',
+      'linkedin.com': 'LinkedIn', 'instagram.com': 'Meta',
+      'tiktok.com': 'TikTok', 'bytedance.com': 'ByteDance',
+      'cloudflare.com': 'Cloudflare', 'vercel.com': 'Vercel',
+      'openai.com': 'OpenAI', 'anthropic.com': 'Anthropic',
+      'hermes-agent.nousresearch.com': 'Hermes',
+    };
+    // Check known domains
+    for (const [d, brand] of Object.entries(known)) {
+      if (domain === d || domain.endsWith('.' + d)) return brand;
+    }
+    // Extract brand from domain parts
+    const parts = domain.split('.');
+    const skip = new Set(['notify','mail','em','noreply','bounce','bounces','pm','mailer',
+      'email','info','news','reply','no-reply','do-not-reply','postmaster','support',
+      'auto','outbound','inbound','send','sending','ses','smtp','mx','mta','relay',
+      'gateway','server','srv','app','api','web','www','cdn','static','assets']);
+    // Take the LAST meaningful part before TLD (most likely the brand)
+    let brand = '';
+    for (let i = parts.length - 2; i >= 0; i--) {
+      const p = parts[i].toLowerCase();
+      if (p.length > 2 && !skip.has(p) && !/^\d+$/.test(p) && !/^[a-f0-9]{8,}$/.test(p)) {
+        brand = parts[i];
+        break;
+      }
+    }
+    if (brand) {
+      return brand.charAt(0).toUpperCase() + brand.slice(1);
+    }
+  }
+  return addr;
 }
 
 // ─── Email Content Sanitizer (handles ALL email formats) ───
