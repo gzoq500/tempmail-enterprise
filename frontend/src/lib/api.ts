@@ -19,8 +19,8 @@ export interface Email {
   is_read: boolean;
 }
 
-export async function generateAlias(): Promise<Alias> {
-  const res = await fetch(`${API_BASE}/alias`, { method: 'POST' });
+export async function generateAlias(duration: string = '24h'): Promise<Alias> {
+  const res = await fetch(`${API_BASE}/alias`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duration }) });
   if (!res.ok) throw new Error('Failed to generate alias');
   return res.json();
 }

@@ -263,10 +263,20 @@ function EmailDetail({ email, onBack }: { email: Email; onBack: () => void }) {
   );
 }
 
+// ─── Duration options ───
+const DURATION_OPTIONS = [
+  { value: '1h', label: '1 Jam' },
+  { value: '24h', label: '24 Jam' },
+  { value: '7d', label: '7 Hari' },
+  { value: '30d', label: '1 Bulan' },
+  { value: 'forever', label: '∞ Tanpa Batas' },
+];
+
 // ─── Main Page ───
 export default function Home() {
   const [aliases, setAliases] = useState<any[]>([]);
   const [activeAlias, setActiveAlias] = useState<Alias | null>(null);
+  const [duration, setDuration] = useState('24h');
   const [emails, setEmails] = useState<Email[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [lastEmailId, setLastEmailId] = useState(0);
@@ -289,14 +299,16 @@ export default function Home() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [activeAlias, lastEmailId, selectedEmail, loadEmails]);
 
-  const handleGenerate = async () => { setLoading(true); try { const alias = await generateAlias(); setActiveAlias(alias); setSelectedEmail(null); setEmails([]); setLastEmailId(0); loadAliases(); loadEmails(alias.email); } catch (err) { console.error(err); } setLoading(false); };
+  const handleGenerate = async () => { setLoading(true); try { const alias = await generateAlias(duration); setActiveAlias(alias); setSelectedEmail(null); setEmails([]); setLastEmailId(0); loadAliases(); loadEmails(alias.email); } catch (err) { console.error(err); } setLoading(false); };
   const handleCopyEmail = () => { if (!activeAlias) return; navigator.clipboard.writeText(activeAlias.email); setShowToast(true); setTimeout(() => setShowToast(false), 2000); };
   const handleRefresh = () => { if (activeAlias) { setRefreshing(true); loadEmails(activeAlias.email); setTimeout(() => setRefreshing(false), 800); } };
   const handleApplyCustomEmail = async (username: string) => {
     setLoading(true);
     try {
       const email = username ? `${username}@${emailDomain}` : '';
-      const res = await fetch('/api/alias', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: email ? JSON.stringify({email}) : '{}' });
+      const body: any = { duration };
+      if (email) body.email = email;
+      const res = await fetch('/api/alias', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       if (data.email) { setActiveAlias(data); setSelectedEmail(null); setEmails([]); setLastEmailId(0); loadAliases(); loadEmails(data.email); }
     } catch (err) { console.error(err); }
@@ -317,10 +329,20 @@ export default function Home() {
           <p className="text-lg text-gray-300 mb-2">Email Sementara</p>
           <p className="text-sm text-gray-500 max-w-md mx-auto mb-6">Lindungi privasi Anda dengan email sementara. Generate email random, terima pesan langsung, tanpa registrasi.</p>
           {!activeAlias && (
-            <button onClick={handleGenerate} disabled={loading} className="btn-primary text-base px-8 py-3">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              {loading ? 'Generating...' : 'Generate Email Baru'}
-            </button>
+            <div className="space-y-3">
+              <div className="flex flex-wrap justify-center gap-2">
+                {DURATION_OPTIONS.map(opt => (
+                  <button key={opt.value} onClick={() => setDuration(opt.value)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${duration === opt.value ? 'bg-purple-600 text-white' : 'bg-gray-800/60 text-gray-400 hover:text-white'}`}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <button onClick={handleGenerate} disabled={loading} className="btn-primary text-base px-8 py-3">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                {loading ? 'Generating...' : 'Generate Email Baru'}
+              </button>
+            </div>
           )}
         </div>
       </section>
@@ -418,7 +440,7 @@ export default function Home() {
                       <p className="font-mono font-semibold text-gray-200 text-sm break-all">{alias.email}</p>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">{alias.email_count} email</span>
-                        <span className="text-xs text-gray-500">Exp: {new Date(alias.expires_at).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}</span>
+                        <span className="text-xs text-gray-500">{alias.expires_at.startsWith('2099') ? '∞ Tanpa Batas' : `Exp: ${new Date(alias.expires_at).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}`}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">

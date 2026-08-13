@@ -234,23 +234,28 @@ static std::string extract_part_by_boundary(const std::string& body, const std::
 }
 
 std::string extract_html_body(const std::string& body) {
-    // Try boundary-based extraction first (more robust)
+    // Try boundary-based extraction first (most robust)
     std::string result = extract_part_by_boundary(body, "text/html");
     if (!result.empty()) return result;
     
-    // Fallback to regex
-    std::regex html_regex("(Content-Type: text/html[^\\r\\n]*(?:\\r?\\n(?!\\r?\\n)[^\\r\\n]*)*)\\r?\\n\\r?\\n([\\s\\S]*?)(?:--[0-9a-zA-Z_+=/-]+|$)");
-    std::smatch match;
-    if (std::regex_search(body, match, html_regex)) {
-        std::string headers = match[1].str();
-        std::string html = match[2].str();
-        while (!html.empty() && (html.back() == '\r' || html.back() == '\n' || html.back() == ' ')) {
-            html.pop_back();
+    // Simple string-based fallback (no regex = no hang on large bodies)
+    // Look for Content-Type: text/html header followed by blank line
+    std::string lower = body;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    size_t pos = lower.find("content-type: text/html");
+    if (pos != std::string::npos) {
+        // Find the blank line after headers
+        size_t blank = body.find("\n\n", pos);
+        if (blank == std::string::npos) blank = body.find("\r\n\r\n", pos);
+        if (blank != std::string::npos) {
+            std::string html = body.substr(blank + 2);
+            // Trim trailing whitespace
+            while (!html.empty() && (html.back() == '\r' || html.back() == '\n' || html.back() == ' ')) html.pop_back();
+            if (!html.empty()) return html;
         }
-        if (!html.empty()) return decode_content(headers, html);
     }
     
-    // Fallback: body starts directly with HTML (no MIME headers)
+    // Body starts directly with HTML
     if (body.find("<html") != std::string::npos || body.find("<!DOCTYPE") != std::string::npos || body.find("<body") != std::string::npos) {
         return body;
     }
@@ -259,20 +264,22 @@ std::string extract_html_body(const std::string& body) {
 }
 
 std::string extract_text_body(const std::string& body) {
-    // Try boundary-based extraction first (more robust)
+    // Try boundary-based extraction first (most robust)
     std::string result = extract_part_by_boundary(body, "text/plain");
     if (!result.empty()) return result;
     
-    // Fallback to regex
-    std::regex text_regex("(Content-Type: text/plain[^\\r\\n]*(?:\\r?\\n(?!\\r?\\n)[^\\r\\n]*)*)\\r?\\n\\r?\\n([\\s\\S]*?)(?:--[0-9a-zA-Z_+=/-]+|$)");
-    std::smatch match;
-    if (std::regex_search(body, match, text_regex)) {
-        std::string headers = match[1].str();
-        std::string text = match[2].str();
-        while (!text.empty() && (text.back() == '\r' || text.back() == '\n' || text.back() == ' ')) {
-            text.pop_back();
+    // Simple string-based fallback (no regex)
+    std::string lower = body;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    size_t pos = lower.find("content-type: text/plain");
+    if (pos != std::string::npos) {
+        size_t blank = body.find("\n\n", pos);
+        if (blank == std::string::npos) blank = body.find("\r\n\r\n", pos);
+        if (blank != std::string::npos) {
+            std::string text = body.substr(blank + 2);
+            while (!text.empty() && (text.back() == '\r' || text.back() == '\n' || text.back() == ' ')) text.pop_back();
+            if (!text.empty()) return text;
         }
-        return decode_content(headers, text);
     }
     return "";
 }
@@ -351,78 +358,85 @@ ParsedEmail parse_email(const std::string& raw_email) {
     return result;
 }
 
-// Remove <style>, <script>, <head> blocks
+// Remove <style>, <script>, <head> blocks — simple string scan, no regex
 std::string strip_style_blocks(const std::string& html) {
-    std::string result = html;
-    std::regex style_re("<style[^>]*>[\\s\\S]*?</style>", std::regex::icase);
-    result = std::regex_replace(result, style_re, "");
-    std::regex script_re("<script[^>]*>[\\s\\S]*?</script>", std::regex::icase);
-    result = std::regex_replace(result, script_re, "");
-    std::regex head_re("<head>[\\s\\S]*?</head>", std::regex::icase);
-    result = std::regex_replace(result, head_re, "");
-    // Remove conditional comments
-    std::regex mso_re("<!--[\\s\\S]*?-->");
-    result = std::regex_replace(result, mso_re, "");
+    std::string result;
+    result.reserve(html.size());
+    size_t i = 0;
+    while (i < html.size()) {
+        // Check for blocks to skip
+        const char* skip_tags[] = {"<style", "<script", "<head", "<!--"};
+        const char* end_tags[] = {"</style>", "</script>", "</head>", "-->"};
+        bool skipped = false;
+        for (int t = 0; t < 4; t++) {
+            size_t tag_len = strlen(skip_tags[t]);
+            if (i + tag_len <= html.size() && strncasecmp(html.c_str() + i, skip_tags[t], tag_len) == 0) {
+                size_t end_pos = html.find(end_tags[t], i + tag_len);
+                if (end_pos != std::string::npos) {
+                    i = end_pos + strlen(end_tags[t]);
+                    skipped = true;
+                    break;
+                }
+            }
+        }
+        if (!skipped) {
+            result += html[i];
+            i++;
+        }
+    }
     return result;
 }
 
 // Strip all HTML tags, decode common entities, convert <br>/<p>/<div> to newlines
 std::string strip_html_tags(const std::string& html) {
-    std::string result = strip_style_blocks(html);
+    std::string result;
+    result.reserve(html.size());
     
-    // Convert block elements to newlines BEFORE stripping tags
-    std::regex br_re("<br\\s*/?>", std::regex::icase);
-    result = std::regex_replace(result, br_re, "\n");
-    std::regex p_re("</p>", std::regex::icase);
-    result = std::regex_replace(result, p_re, "\n\n");
-    std::regex div_re("</div>", std::regex::icase);
-    result = std::regex_replace(result, div_re, "\n");
-    std::regex tr_re("<tr[^>]*>", std::regex::icase);
-    result = std::regex_replace(result, tr_re, "\n");
-    std::regex li_re("</li>", std::regex::icase);
-    result = std::regex_replace(result, li_re, "\n");
+    bool in_tag = false;
+    bool in_style = false;
+    bool in_script = false;
     
-    // Preserve links: convert <a href="URL">text</a> to "text [URL]"
-    std::regex link_re("<a[^>]*href=\"([^\"]*)\"[^>]*>([^<]*)</a>", std::regex::icase);
-    result = std::regex_replace(result, link_re, "$2 [$1]");
-
-    // Strip all remaining HTML tags
-    std::regex tag_re("<[^>]*>");
-    result = std::regex_replace(result, tag_re, "");
-    
-    // Decode common HTML entities
-    auto replace_all = [](std::string& s, const std::string& from, const std::string& to) {
-        size_t pos = 0;
-        while ((pos = s.find(from, pos)) != std::string::npos) {
-            s.replace(pos, from.length(), to);
-            pos += to.length();
+    for (size_t i = 0; i < html.size(); i++) {
+        // Check for tag start
+        if (html[i] == '<') {
+            // Check for style/script blocks
+            if (i + 6 < html.size() && strncasecmp(html.c_str() + i, "<style", 6) == 0) { in_style = true; in_tag = true; continue; }
+            if (i + 7 < html.size() && strncasecmp(html.c_str() + i, "<script", 7) == 0) { in_script = true; in_tag = true; continue; }
+            if (i + 7 < html.size() && strncasecmp(html.c_str() + i, "</style", 7) == 0) { in_style = false; in_tag = true; continue; }
+            if (i + 8 < html.size() && strncasecmp(html.c_str() + i, "</script", 8) == 0) { in_script = false; in_tag = true; continue; }
+            
+            // Convert <br>, </p>, </div>, </tr>, </li> to newlines
+            if (i + 3 < html.size() && (strncasecmp(html.c_str() + i, "<br", 3) == 0)) { result += '\n'; in_tag = true; continue; }
+            if (i + 3 < html.size() && strncasecmp(html.c_str() + i, "</p", 3) == 0) { result += '\n'; in_tag = true; continue; }
+            if (i + 5 < html.size() && strncasecmp(html.c_str() + i, "</div", 5) == 0) { result += '\n'; in_tag = true; continue; }
+            if (i + 3 < html.size() && strncasecmp(html.c_str() + i, "<tr", 3) == 0) { result += '\n'; in_tag = true; continue; }
+            if (i + 4 < html.size() && strncasecmp(html.c_str() + i, "</li", 4) == 0) { result += '\n'; in_tag = true; continue; }
+            
+            in_tag = true;
+            continue;
         }
-    };
-    replace_all(result, "&amp;", "&");
-    replace_all(result, "&lt;", "<");
-    replace_all(result, "&gt;", ">");
-    replace_all(result, "&quot;", "\"");
-    replace_all(result, "&#39;", "'");
-    replace_all(result, "&nbsp;", " ");
-    
-    // Clean up whitespace
-    // Collapse multiple spaces
-    std::regex multi_space("[ \\t]{2,}");
-    result = std::regex_replace(result, multi_space, " ");
-    // Remove leading whitespace from lines
-    std::regex lead_space("\\n[ \\t]+");
-    result = std::regex_replace(result, lead_space, "\n");
-    // Collapse 3+ newlines to 2
-    std::regex multi_newline("\\n{3,}");
-    result = std::regex_replace(result, multi_newline, "\n\n");
+        
+        if (html[i] == '>') { in_tag = false; continue; }
+        if (in_tag || in_style || in_script) continue;
+        
+        // Decode HTML entities
+        if (html[i] == '&') {
+            if (html.compare(i, 5, "&amp;") == 0) { result += '&'; i += 4; }
+            else if (html.compare(i, 4, "&lt;") == 0) { result += '<'; i += 3; }
+            else if (html.compare(i, 4, "&gt;") == 0) { result += '>'; i += 3; }
+            else if (html.compare(i, 6, "&quot;") == 0) { result += '"'; i += 5; }
+            else if (html.compare(i, 5, "&#39;") == 0) { result += '\''; i += 4; }
+            else if (html.compare(i, 6, "&nbsp;") == 0) { result += ' '; i += 5; }
+            else { result += html[i]; }
+            continue;
+        }
+        
+        result += html[i];
+    }
     
     // Trim
-    while (!result.empty() && (result.back() == '\n' || result.back() == '\r' || result.back() == ' ')) {
-        result.pop_back();
-    }
-    while (!result.empty() && (result.front() == '\n' || result.front() == '\r' || result.front() == ' ')) {
-        result.erase(0, 1);
-    }
+    while (!result.empty() && (result.back() == '\n' || result.back() == '\r' || result.back() == ' ')) result.pop_back();
+    while (!result.empty() && (result.front() == '\n' || result.front() == '\r' || result.front() == ' ')) result.erase(0, 1);
     
     return result;
 }

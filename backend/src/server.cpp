@@ -60,58 +60,61 @@ void TempMailServer::start() {
         return httplib::Server::HandlerResponse::Unhandled;
     });
 
-    // POST /api/alias - Generate new alias (random or custom)
+    // POST /api/alias - Generate new alias (random or custom, with duration)
     svr.Post("/api/alias", [this](const httplib::Request& req, httplib::Response& res) {
-        // Check if custom email provided
+        // Parse request body
         std::string custom_email;
-        if (req.has_param("email")) {
-            custom_email = req.get_param_value("email");
-        } else if (!req.body.empty()) {
+        std::string duration = "24h"; // default
+        if (req.has_param("email")) custom_email = req.get_param_value("email");
+        if (req.has_param("duration")) duration = req.get_param_value("duration");
+        if (!req.body.empty()) {
             try {
                 auto j = json::parse(req.body);
-                if (j.contains("email")) {
-                    custom_email = j["email"].get<std::string>();
-                }
+                if (j.contains("email")) custom_email = j["email"].get<std::string>();
+                if (j.contains("duration")) duration = j["duration"].get<std::string>();
             } catch (...) {}
+        }
+
+        // Calculate expiry from duration
+        std::string expires_at;
+        if (duration == "forever") {
+            expires_at = "2099-12-31T23:59:59Z";
+        } else {
+            long long hours = 24; // default 24h
+            if (duration == "1h") hours = 1;
+            else if (duration == "24h") hours = 24;
+            else if (duration == "7d") hours = 24 * 7;
+            else if (duration == "30d") hours = 24 * 30;
+            else { try { hours = std::stoll(duration); } catch (...) {} }
+            auto now = std::chrono::system_clock::now() + std::chrono::hours(hours);
+            auto time = std::chrono::system_clock::to_time_t(now);
+            std::ostringstream oss;
+            oss << std::put_time(std::gmtime(&time), "%Y-%m-%dT%H:%M:%SZ");
+            expires_at = oss.str();
         }
 
         // Custom alias
         if (!custom_email.empty()) {
-            // Validate format
             if (custom_email.find("@") == std::string::npos || custom_email.find("@") == 0) {
                 custom_email = custom_email + "@" + domain_;
             }
-            // Check if exists
             if (db_.get_alias(custom_email).has_value()) {
                 res.status = 409;
                 res.set_content(R"({"error":"Alias already exists"})", "application/json");
                 return;
             }
-            auto now = std::chrono::system_clock::now() + std::chrono::hours(24);
-            auto time = std::chrono::system_clock::to_time_t(now);
-            std::ostringstream oss;
-            oss << std::put_time(std::gmtime(&time), "%Y-%m-%dT%H:%M:%SZ");
-            auto a = db_.create_alias(custom_email, oss.str());
+            auto a = db_.create_alias(custom_email, expires_at);
             json j = {{"id", a.id}, {"email", a.email}, {"expires_at", a.expires_at}};
             res.set_content(j.dump(), "application/json");
             return;
         }
 
-        // Random alias (original logic)
+        // Random alias
         for (int i = 0; i < 10; ++i) {
             std::string alias = generate_alias();
             std::string email = alias + "@" + domain_;
-
-            // Check if exists
             if (db_.get_alias(email).has_value()) continue;
-
-            // Calculate expiry (24 hours from now)
-            auto now = std::chrono::system_clock::now() + std::chrono::hours(24);
-            auto time = std::chrono::system_clock::to_time_t(now);
-            std::ostringstream oss;
-            oss << std::put_time(std::gmtime(&time), "%Y-%m-%dT%H:%M:%SZ");
-
-            auto a = db_.create_alias(email, oss.str());
+            auto a = db_.create_alias(email, expires_at);
             json j = {{"id", a.id}, {"email", a.email}, {"expires_at", a.expires_at}};
             res.set_content(j.dump(), "application/json");
             return;
@@ -146,6 +149,7 @@ void TempMailServer::start() {
         if (req.has_param("after")) after = std::stoi(req.get_param_value("after"));
 
         auto emails = db_.get_emails(alias->id, after);
+        std::cout << "[EMAILS] " << email << " -> " << emails.size() << " emails found" << std::endl;
         db_.mark_alias_read(alias->id);
 
         json arr = json::array();
@@ -289,6 +293,24 @@ void TempMailServer::start() {
             if (clean_html.empty() && !raw_stored.empty() && raw_stored.find("<") != std::string::npos) {
                 clean_html = raw_stored;
             }
+            
+            // ── Sanitize UTF-8 (remove invalid bytes) ──
+            auto sanitize_utf8 = [](std::string& s) {
+                std::string clean;
+                clean.reserve(s.size());
+                for (size_t i = 0; i < s.size(); i++) {
+                    unsigned char c = s[i];
+                    if (c < 0x80) { clean += c; }
+                    else if (c >= 0xC0 && c <= 0xDF && i + 1 < s.size() && (s[i+1] & 0xC0) == 0x80) { clean += s[i]; clean += s[i+1]; i++; }
+                    else if (c >= 0xE0 && c <= 0xEF && i + 2 < s.size() && (s[i+1] & 0xC0) == 0x80 && (s[i+2] & 0xC0) == 0x80) { clean += s[i]; clean += s[i+1]; clean += s[i+2]; i += 2; }
+                    else if (c >= 0xF0 && c <= 0xF7 && i + 3 < s.size() && (s[i+1] & 0xC0) == 0x80 && (s[i+2] & 0xC0) == 0x80 && (s[i+3] & 0xC0) == 0x80) { clean += s[i]; clean += s[i+1]; clean += s[i+2]; clean += s[i+3]; i += 3; }
+                    else { clean += '?'; } // Replace invalid byte
+                }
+                s = clean;
+            };
+            sanitize_utf8(clean_html);
+            sanitize_utf8(clean_body);
+            
 int id = db_.store_email(alias->id, from, to, subject, clean_body, clean_html);
             std::cout << "[INCOMING] " << from << " -> " << to << " (" << subject << ") id=" << id << std::endl;
 
