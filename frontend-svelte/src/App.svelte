@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { generateAlias, getAliases, getEmails, deleteAlias, checkNewEmails, sendEmail } from './lib/api.js';
-  import { formatSender, renderEmail, fmtDate, DURATIONS } from './lib/helpers.js';
+  import { generateAlias, getAliases, getEmails, deleteAlias, checkNewEmails, sendEmail } from './lib/api';
+  import { formatSender, renderEmail, fmtDate, DURATIONS } from './lib/helpers';
 
   let aliases = [];
   let activeAlias = null;

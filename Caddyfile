@@ -1,0 +1,11 @@
+tempmail.routerssh.web.id {
+    reverse_proxy /api/* localhost:3001
+    root * /opt/tempmail/frontend-svelte/dist
+    file_server
+}
+
+mail.routerssh.web.id {
+    root * /var/lib/roundcube
+    php_fastcgi unix//run/php/php8.1-fpm.sock
+    file_server
+}
