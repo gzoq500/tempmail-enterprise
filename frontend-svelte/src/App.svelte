@@ -32,23 +32,30 @@
   $: emailView = selectedEmail ? buildEmailDocument(selectedEmail.body_html, selectedEmail.body_text) : null;
 
   async function loadAliases() { try { aliases = (await getAliases()).aliases; } catch {} }
-  async function loadEmails(email) { try { const d = await getEmails(email); emails = d.emails; if (d.emails.length > 0) lastEmailId = Math.max(...d.emails.map(e => e.id)); } catch {} }
+  async function loadEmails(email) {
+    try {
+      const d = await getEmails(email);
+      // A slower response for the previous alias must never overwrite the
+      // inbox after the user has already switched to another alias.
+      if (activeAlias?.email !== email) return;
+      emails = d.emails;
+      if (d.emails.length > 0) lastEmailId = Math.max(...d.emails.map(e => e.id));
+    } catch {}
+  }
   // Inbox items arrive metadata-only; fetch the body when an email is opened.
-  let openingEmail = false;
   async function openEmail(emailRow) {
     selectedEmail = emailRow; stopPolling();
     if (emailRow.body_html !== undefined || emailRow.body_text !== undefined) return;
-    if (openingEmail) return;
-    openingEmail = true;
     try {
       const key = getAliasApiKey(emailRow.to_address || activeAlias?.email || '');
       const res = await fetch('/api/email/' + emailRow.id, { headers: key ? { 'X-API-Key': key } : {} });
       if (res.ok) {
         const full = await res.json();
+        // Clicking email B while A is still loading must not leave B blank or
+        // let A's slower response replace B.
         if (selectedEmail && selectedEmail.id === full.id) selectedEmail = full;
       }
     } catch {}
-    openingEmail = false;
   }
   async function handleGenerate() { loading = true; try { const a = await generateAlias(duration); activeAlias = a; selectedEmail = null; emails = []; lastEmailId = 0; await loadAliases(); await loadEmails(a.email); startPolling(); } catch {} loading = false; }
   let toastTimer = null;
@@ -87,7 +94,15 @@
           emails = [email, ...emails.filter(e => e.id !== email.id)];
           lastEmailId = Math.max(lastEmailId, email.id);
         }
-      } catch {}
+      } catch (error) {
+        if (generation !== pollingGeneration) return;
+        // Abort is expected when changing views. Network/auth/server failures
+        // must back off; otherwise an immediate rejection creates a tight loop
+        // that burns client CPU and floods the API.
+        if (error?.name !== 'AbortError') {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+      }
     }
   }
   function startPolling() {

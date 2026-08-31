@@ -158,22 +158,27 @@ std::string decode_content(const std::string& headers, const std::string& conten
     return content;
 }
 
-// Extract boundary from Content-Type header
-static std::string extract_boundary(const std::string& body) {
-    auto pos = body.find("boundary=");
+// Extract a MIME boundary case-insensitively from an entity's headers.
+static std::string extract_boundary(const std::string& headers) {
+    std::string lower = headers;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    auto pos = lower.find("boundary=");
     if (pos == std::string::npos) return "";
-    pos += 8;
+    pos += 9;
     char quote = 0;
-    if (pos < body.size() && (body[pos] == '"' || body[pos] == '\'')) {
-        quote = body[pos++];
+    if (pos < headers.size() && (headers[pos] == '"' || headers[pos] == '\'')) {
+        quote = headers[pos++];
     }
-    size_t start = pos;
-    while (pos < body.size()) {
-        if (quote && body[pos] == quote) break;
-        if (!quote && (body[pos] == ';' || body[pos] == '\r' || body[pos] == '\n' || body[pos] == ' ')) break;
-        pos++;
+    const size_t start = pos;
+    while (pos < headers.size()) {
+        if (quote && headers[pos] == quote) break;
+        if (!quote && (headers[pos] == ';' || headers[pos] == '\r' || headers[pos] == '\n' ||
+                       std::isspace(static_cast<unsigned char>(headers[pos])))) break;
+        ++pos;
     }
-    return body.substr(start, pos - start);
+    return headers.substr(start, pos - start);
 }
 
 // Split MIME body by boundary and extract parts
@@ -224,20 +229,55 @@ static std::vector<MimePart> split_mime_parts(const std::string& body, const std
     return parts;
 }
 
-// Boundary-aware extraction: more robust than regex
-static std::string extract_part_by_boundary(const std::string& body, const std::string& type) {
-    std::string boundary = extract_boundary(body);
-    if (boundary.empty()) return "";
-    
-    auto parts = split_mime_parts(body, boundary);
-    for (const auto& part : parts) {
-        std::string lower_headers = part.headers;
-        std::transform(lower_headers.begin(), lower_headers.end(), lower_headers.begin(), ::tolower);
-        if (lower_headers.find("content-type: " + type) != std::string::npos) {
-            return decode_content(part.headers, part.content);
+// Split an entity into headers/body, accepting both CRLF and LF-only input.
+static MimePart split_mime_entity(const std::string& entity) {
+    MimePart out;
+    size_t end = entity.find("\r\n\r\n");
+    size_t skip = 4;
+    if (end == std::string::npos) {
+        end = entity.find("\n\n");
+        skip = 2;
+    }
+    if (end == std::string::npos) {
+        out.content = entity;
+    } else {
+        out.headers = entity.substr(0, end);
+        out.content = entity.substr(end + skip);
+    }
+    return out;
+}
+
+// Recursively traverse multipart MIME entities. Real mail commonly nests
+// multipart/alternative inside multipart/mixed; a one-level parser leaks inner
+// boundaries, part headers and attachment bytes into the displayed body.
+static std::string extract_part_recursive(const std::string& entity,
+                                          const std::string& wanted_type,
+                                          int depth = 0) {
+    if (depth > 12) return "";  // bounded recursion for hostile MIME trees
+    const MimePart current = split_mime_entity(entity);
+    std::string lower_headers = current.headers;
+    std::transform(lower_headers.begin(), lower_headers.end(), lower_headers.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    const std::string boundary = extract_boundary(current.headers);
+    if (lower_headers.find("content-type: multipart/") != std::string::npos && !boundary.empty()) {
+        const auto parts = split_mime_parts(current.content, boundary);
+        for (const auto& part : parts) {
+            const std::string child = part.headers + "\r\n\r\n" + part.content;
+            std::string found = extract_part_recursive(child, wanted_type, depth + 1);
+            if (!found.empty()) return found;
         }
+        return "";
+    }
+
+    if (lower_headers.find("content-type: " + wanted_type) != std::string::npos) {
+        return decode_content(current.headers, current.content);
     }
     return "";
+}
+
+static std::string extract_part_by_boundary(const std::string& body, const std::string& type) {
+    return extract_part_recursive(body, type);
 }
 
 std::string extract_html_body(const std::string& body) {

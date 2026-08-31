@@ -18,7 +18,7 @@ TimeoutStopSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=/opt/tempmail/backend/data /var/mail
+ReadWritePaths=/opt/tempmail/backend/data
 
 [Install]
 WantedBy=multi-user.target

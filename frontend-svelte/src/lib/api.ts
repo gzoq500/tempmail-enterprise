@@ -95,11 +95,19 @@ export async function getAliases(): Promise<AliasResponse> {
   for (const item of loadKeys()) {
     try {
       const res = await fetch(`${API}/aliases`, { headers: authHeaders(item.api_key) });
-      if (!res.ok) continue;
-      const data: AliasResponse = await res.json();
-      for (const alias of data.aliases || []) aliases.push({ ...alias, api_key: item.api_key });
+      if (res.ok) {
+        const data: AliasResponse = await res.json();
+        for (const alias of data.aliases || []) aliases.push({ ...alias, api_key: item.api_key });
+        validKeys.push(item);
+      } else if (res.status !== 401 && res.status !== 404) {
+        // Transient server/edge errors must not erase the only local copy of
+        // this bearer key. Prune only keys the backend explicitly rejects.
+        validKeys.push(item);
+      }
+    } catch {
+      // Offline/DNS/TLS failure: preserve credentials and retry next load.
       validKeys.push(item);
-    } catch {}
+    }
   }
   saveKeys(validKeys);
   aliases.sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -151,4 +159,19 @@ export async function sendEmail(from: string, name: string, to: string, subject:
 
 export function getAliasApiKey(email: string): string {
   return keyForEmail(email);
+}
+
+// Open an existing inbox from another browser: verify email+key against the
+// server, then persist the pair in this browser's localStorage.
+export async function importAliasKey(email: string, apiKey: string): Promise<Alias> {
+  email = email.trim().toLowerCase();
+  apiKey = apiKey.trim();
+  if (!/^temp-[A-Za-z0-9]{20,64}$/.test(apiKey)) throw new Error('Format API key tidak valid');
+  const res = await fetch(`${API}/aliases`, { headers: authHeaders(apiKey) });
+  if (!res.ok) throw new Error('Email atau API key salah');
+  const data: AliasResponse = await res.json();
+  const alias = (data.aliases || []).find((a) => a.email === email);
+  if (!alias) throw new Error('Key ini bukan milik email tersebut');
+  storeAliasKey(email, apiKey);
+  return { ...alias, api_key: apiKey };
 }

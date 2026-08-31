@@ -85,6 +85,49 @@ void Database::init_schema() {
     // O(1) seek instead of scanning every alias.
     sqlite3_exec(db_, "ALTER TABLE aliases ADD COLUMN key_lookup BLOB", nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_aliases_key_lookup ON aliases(key_lookup)", nullptr, nullptr, nullptr);
+    // Version encrypted rows so authentication failure can never be mistaken
+    // for a legacy plaintext row. Existing rows stay version 0 and retain the
+    // historical row-key/per-field/plaintext fallback chain.
+    sqlite3_exec(db_, "ALTER TABLE emails ADD COLUMN crypto_version INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+
+    // Backfill the version only when existing bytes authenticate with either
+    // historical encryption scheme. Genuine plaintext legacy rows remain 0.
+    std::vector<std::pair<int, int>> encrypted_ids;
+    sqlite3_stmt* rows = nullptr;
+    if (sqlite3_prepare_v2(db_,
+            "SELECT id, from_address FROM emails WHERE crypto_version IN (0, 1)",
+            -1, &rows, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(rows) == SQLITE_ROW) {
+            const int id = sqlite3_column_int(rows, 0);
+            const void* ptr = sqlite3_column_blob(rows, 1);
+            const int len = sqlite3_column_bytes(rows, 1);
+            if (!ptr || len <= 0) continue;
+            const std::string raw(static_cast<const char*>(ptr), static_cast<size_t>(len));
+            const std::string rid = std::to_string(id);
+            std::string plain;
+            const std::string row_key = tempmail_crypto::derive_row_key_public(master_key_, rid);
+            int version = 0;
+            if (tempmail_crypto::decrypt_field_with_key(row_key, raw, plain)) {
+                version = 1;  // current row-key scheme
+            } else if (tempmail_crypto::decrypt_field(master_key_, rid + ":from", raw, plain)) {
+                version = 2;  // historical per-field scheme
+            }
+            if (version != 0) encrypted_ids.emplace_back(id, version);
+        }
+    }
+    sqlite3_finalize(rows);
+    sqlite3_stmt* mark = nullptr;
+    if (!encrypted_ids.empty() &&
+        sqlite3_prepare_v2(db_, "UPDATE emails SET crypto_version = ? WHERE id = ?", -1, &mark, nullptr) == SQLITE_OK) {
+        for (const auto& [id, version] : encrypted_ids) {
+            sqlite3_bind_int(mark, 1, version);
+            sqlite3_bind_int(mark, 2, id);
+            sqlite3_step(mark);
+            sqlite3_reset(mark);
+            sqlite3_clear_bindings(mark);
+        }
+    }
+    sqlite3_finalize(mark);
 }
 
 Alias Database::create_alias(const std::string& email, const std::string& expires_at,
@@ -127,7 +170,7 @@ std::optional<Alias> Database::get_alias(const std::string& email) {
     const char* sql = R"(
         SELECT a.id, a.email, a.created_at, a.expires_at, COUNT(e.id)
         FROM aliases a LEFT JOIN emails e ON a.id = e.alias_id
-        WHERE a.email = ? GROUP BY a.id
+        WHERE a.email = ? AND datetime(a.expires_at) > datetime('now') GROUP BY a.id
     )";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
@@ -158,7 +201,7 @@ std::optional<Alias> Database::get_alias_by_api_key(const std::string& api_key) 
         const char* idx_sql = R"(
             SELECT a.id, a.email, a.created_at, a.expires_at, a.api_key, COUNT(e.id)
             FROM aliases a LEFT JOIN emails e ON a.id = e.alias_id
-            WHERE a.key_lookup = ? AND a.expires_at > datetime('now')
+            WHERE a.key_lookup = ? AND datetime(a.expires_at) > datetime('now')
             GROUP BY a.id
         )";
         sqlite3_stmt* idx_stmt = nullptr;
@@ -182,7 +225,7 @@ std::optional<Alias> Database::get_alias_by_api_key(const std::string& api_key) 
     const char* sql = R"(
         SELECT a.id, a.email, a.created_at, a.expires_at, a.api_key, COUNT(e.id)
         FROM aliases a LEFT JOIN emails e ON a.id = e.alias_id
-        WHERE a.api_key IS NOT NULL AND a.expires_at > datetime('now')
+        WHERE a.api_key IS NOT NULL AND datetime(a.expires_at) > datetime('now')
         GROUP BY a.id
     )";
     sqlite3_stmt* stmt = nullptr;
@@ -240,7 +283,7 @@ std::vector<Alias> Database::get_active_aliases(const std::string& api_key) {
     const char* sql = R"(
         SELECT a.id, a.email, a.created_at, a.expires_at, COUNT(e.id)
         FROM aliases a LEFT JOIN emails e ON a.id = e.alias_id
-        WHERE a.expires_at > datetime('now') AND (? = '' OR a.api_key = ?)
+        WHERE datetime(a.expires_at) > datetime('now') AND (? = '' OR a.api_key = ?)
         GROUP BY a.id ORDER BY a.created_at DESC
     )";
     sqlite3_stmt* stmt;
@@ -305,11 +348,33 @@ int Database::clear_emails(const std::string& email) {
 int Database::cleanup_expired() {
     std::lock_guard<std::mutex> lock(mutex_);
     char* err = nullptr;
-    sqlite3_exec(db_, "DELETE FROM emails WHERE alias_id NOT IN (SELECT id FROM aliases)", nullptr, nullptr, &err);
+    if (sqlite3_exec(db_, "BEGIN IMMEDIATE", nullptr, nullptr, &err) != SQLITE_OK) {
+        if (err) sqlite3_free(err);
+        return -1;
+    }
+    // Foreign keys are intentionally not required by the minimal SQLite build;
+    // delete dependent rows before aliases so no orphan survives another hour.
+    bool ok = sqlite3_exec(db_,
+        "DELETE FROM emails WHERE alias_id IN "
+        "(SELECT id FROM aliases WHERE datetime(expires_at) < datetime('now'))",
+        nullptr, nullptr, &err) == SQLITE_OK;
+    if (err) { sqlite3_free(err); err = nullptr; }
+    if (ok) {
+        ok = sqlite3_exec(db_,
+            "DELETE FROM aliases WHERE datetime(expires_at) < datetime('now')",
+            nullptr, nullptr, &err) == SQLITE_OK;
+    }
+    const int deleted_aliases = ok ? sqlite3_changes(db_) : -1;
+    if (err) { sqlite3_free(err); err = nullptr; }
+    // Also clear any historical orphans from older cleanup behavior.
+    if (ok) {
+        ok = sqlite3_exec(db_,
+            "DELETE FROM emails WHERE alias_id NOT IN (SELECT id FROM aliases)",
+            nullptr, nullptr, &err) == SQLITE_OK;
+    }
     if (err) sqlite3_free(err);
-    sqlite3_exec(db_, "DELETE FROM aliases WHERE expires_at < datetime('now')", nullptr, nullptr, &err);
-    if (err) sqlite3_free(err);
-    return sqlite3_changes(db_);
+    sqlite3_exec(db_, ok ? "COMMIT" : "ROLLBACK", nullptr, nullptr, nullptr);
+    return ok ? deleted_aliases : -1;
 }
 
 int Database::store_email(const std::string& alias_id, const std::string& from,
@@ -318,17 +383,25 @@ int Database::store_email(const std::string& alias_id, const std::string& from,
     std::lock_guard<std::mutex> lock(mutex_);
     // Two-step write: insert to obtain the row id, then store AES-256-GCM
     // ciphertexts keyed by that row id (HKDF(master, row_id) per row).
+    // Keep placeholder INSERT + encrypted UPDATE in one atomic transaction.
+    // If encryption/update fails, rollback removes the placeholder row too.
+    if (sqlite3_exec(db_, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr) != SQLITE_OK) return -1;
     const char* insert = "INSERT INTO emails (alias_id, from_address, to_address, subject, body_text, body_html) VALUES (?, '', '', '', '', '')";
     sqlite3_stmt* stmt;
-    if (sqlite3_prepare_v2(db_, insert, -1, &stmt, nullptr) != SQLITE_OK) return -1;
+    if (sqlite3_prepare_v2(db_, insert, -1, &stmt, nullptr) != SQLITE_OK) {
+        sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+        return -1;
+    }
     sqlite3_bind_text(stmt, 1, alias_id.c_str(), -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(stmt) != SQLITE_DONE) { sqlite3_finalize(stmt); return -1; }
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        sqlite3_finalize(stmt);
+        sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+        return -1;
+    }
     sqlite3_finalize(stmt);
     const int row_id = static_cast<int>(sqlite3_last_insert_rowid(db_));
     const std::string rid = std::to_string(row_id);
-
-    sqlite3_exec(db_, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr);
-    const char* update = "UPDATE emails SET from_address = ?, to_address = ?, subject = ?, body_text = ?, body_html = ? WHERE id = ?";
+    const char* update = "UPDATE emails SET from_address = ?, to_address = ?, subject = ?, body_text = ?, body_html = ?, crypto_version = 1 WHERE id = ?";
     if (sqlite3_prepare_v2(db_, update, -1, &stmt, nullptr) != SQLITE_OK) {
         sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
         return -1;
@@ -364,10 +437,11 @@ std::string column_blob(sqlite3_stmt* stmt, int col) {
 }
 }  // namespace
 
-std::vector<Email> Database::get_emails(const std::string& alias_id, int after_id) {
+std::vector<Email> Database::get_emails(const std::string& alias_id, int after_id,
+                                        bool include_bodies) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<Email> emails;
-    const char* sql = "SELECT id, alias_id, from_address, to_address, subject, body_text, body_html, received_at, is_read FROM emails WHERE alias_id = ? AND id > ? ORDER BY received_at DESC";
+    const char* sql = "SELECT id, alias_id, from_address, to_address, subject, body_text, body_html, received_at, is_read, crypto_version FROM emails WHERE alias_id = ? AND id > ? ORDER BY id DESC";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
     sqlite3_bind_text(stmt, 1, alias_id.c_str(), -1, SQLITE_TRANSIENT);
@@ -377,32 +451,32 @@ std::vector<Email> Database::get_emails(const std::string& alias_id, int after_i
         e.id = sqlite3_column_int(stmt, 0);
         e.alias_id = column_blob(stmt, 1);
         const std::string rid = std::to_string(e.id);
-        // One HKDF derivation per row; all five fields decrypt with this key
-        // (each blob carries its own random GCM nonce).
+        e.crypto_version = sqlite3_column_int(stmt, 9);
+        // One HKDF derivation per row; all fields decrypt with this key.
         const std::string row_key = tempmail_crypto::derive_row_key_public(master_key_, rid);
-        std::string tmp;
-        const std::string raw_from = column_blob(stmt, 2);
-        // Row-key scheme first; fall back to the older per-field derivation
-        // for rows written before the batching change, then to plaintext.
-        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_from, tmp) &&
-            !tempmail_crypto::decrypt_field(master_key_, rid + ":from", raw_from, tmp)) tmp = raw_from;
-        e.from_address = tmp;
-        const std::string raw_to = column_blob(stmt, 3);
-        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_to, tmp) &&
-            !tempmail_crypto::decrypt_field(master_key_, rid + ":to", raw_to, tmp)) tmp = raw_to;
-        e.to_address = tmp;
-        const std::string raw_subj = column_blob(stmt, 4);
-        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_subj, tmp) &&
-            !tempmail_crypto::decrypt_field(master_key_, rid + ":subj", raw_subj, tmp)) tmp = raw_subj;
-        e.subject = tmp;
-        const std::string raw_text = column_blob(stmt, 5);
-        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_text, tmp) &&
-            !tempmail_crypto::decrypt_field(master_key_, rid + ":text", raw_text, tmp)) tmp = raw_text;
-        e.body_text = tmp;
-        const std::string raw_html = column_blob(stmt, 6);
-        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_html, tmp) &&
-            !tempmail_crypto::decrypt_field(master_key_, rid + ":html", raw_html, tmp)) tmp = raw_html;
-        e.body_html = tmp;
+        auto decrypt_column = [&](int column, const char* legacy_suffix) -> std::string {
+            const std::string raw = column_blob(stmt, column);
+            std::string plain;
+            if (e.crypto_version == 1) {
+                if (tempmail_crypto::decrypt_field_with_key(row_key, raw, plain)) return plain;
+                throw std::runtime_error("Encrypted row authentication failed");
+            }
+            if (e.crypto_version == 2) {
+                if (tempmail_crypto::decrypt_field(master_key_, rid + legacy_suffix, raw, plain)) return plain;
+                throw std::runtime_error("Legacy encrypted row authentication failed");
+            }
+            // Unversioned legacy: detect either scheme, then plaintext.
+            if (tempmail_crypto::decrypt_field_with_key(row_key, raw, plain)) return plain;
+            if (tempmail_crypto::decrypt_field(master_key_, rid + legacy_suffix, raw, plain)) return plain;
+            return raw;
+        };
+        e.from_address = decrypt_column(2, ":from");
+        e.to_address = decrypt_column(3, ":to");
+        e.subject = decrypt_column(4, ":subj");
+        if (include_bodies) {
+            e.body_text = decrypt_column(5, ":text");
+            e.body_html = decrypt_column(6, ":html");
+        }
         e.received_at = column_blob(stmt, 7);
         e.is_read = sqlite3_column_int(stmt, 8) != 0;
         emails.push_back(e);
@@ -413,7 +487,7 @@ std::vector<Email> Database::get_emails(const std::string& alias_id, int after_i
 
 std::optional<Email> Database::get_email(int id) {
     std::lock_guard<std::mutex> lock(mutex_);
-    const char* sql = "SELECT id, alias_id, from_address, to_address, subject, body_text, body_html, received_at, is_read FROM emails WHERE id = ?";
+    const char* sql = "SELECT id, alias_id, from_address, to_address, subject, body_text, body_html, received_at, is_read, crypto_version FROM emails WHERE id = ?";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
     sqlite3_bind_int(stmt, 1, id);
@@ -423,28 +497,28 @@ std::optional<Email> Database::get_email(int id) {
         e.id = sqlite3_column_int(stmt, 0);
         e.alias_id = column_blob(stmt, 1);
         const std::string rid = std::to_string(e.id);
+        e.crypto_version = sqlite3_column_int(stmt, 9);
         const std::string row_key = tempmail_crypto::derive_row_key_public(master_key_, rid);
-        std::string tmp;
-        const std::string raw_from = column_blob(stmt, 2);
-        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_from, tmp) &&
-            !tempmail_crypto::decrypt_field(master_key_, rid + ":from", raw_from, tmp)) tmp = raw_from;
-        e.from_address = tmp;
-        const std::string raw_to = column_blob(stmt, 3);
-        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_to, tmp) &&
-            !tempmail_crypto::decrypt_field(master_key_, rid + ":to", raw_to, tmp)) tmp = raw_to;
-        e.to_address = tmp;
-        const std::string raw_subj = column_blob(stmt, 4);
-        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_subj, tmp) &&
-            !tempmail_crypto::decrypt_field(master_key_, rid + ":subj", raw_subj, tmp)) tmp = raw_subj;
-        e.subject = tmp;
-        const std::string raw_text = column_blob(stmt, 5);
-        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_text, tmp) &&
-            !tempmail_crypto::decrypt_field(master_key_, rid + ":text", raw_text, tmp)) tmp = raw_text;
-        e.body_text = tmp;
-        const std::string raw_html = column_blob(stmt, 6);
-        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_html, tmp) &&
-            !tempmail_crypto::decrypt_field(master_key_, rid + ":html", raw_html, tmp)) tmp = raw_html;
-        e.body_html = tmp;
+        auto decrypt_column = [&](int column, const char* legacy_suffix) -> std::string {
+            const std::string raw = column_blob(stmt, column);
+            std::string plain;
+            if (e.crypto_version == 1) {
+                if (tempmail_crypto::decrypt_field_with_key(row_key, raw, plain)) return plain;
+                throw std::runtime_error("Encrypted row authentication failed");
+            }
+            if (e.crypto_version == 2) {
+                if (tempmail_crypto::decrypt_field(master_key_, rid + legacy_suffix, raw, plain)) return plain;
+                throw std::runtime_error("Legacy encrypted row authentication failed");
+            }
+            if (tempmail_crypto::decrypt_field_with_key(row_key, raw, plain)) return plain;
+            if (tempmail_crypto::decrypt_field(master_key_, rid + legacy_suffix, raw, plain)) return plain;
+            return raw;
+        };
+        e.from_address = decrypt_column(2, ":from");
+        e.to_address = decrypt_column(3, ":to");
+        e.subject = decrypt_column(4, ":subj");
+        e.body_text = decrypt_column(5, ":text");
+        e.body_html = decrypt_column(6, ":html");
         e.received_at = column_blob(stmt, 7);
         e.is_read = sqlite3_column_int(stmt, 8) != 0;
         result = e;

@@ -23,6 +23,7 @@ struct Email {
     std::string body_html;
     std::string received_at;
     bool is_read;
+    int crypto_version = 0;
 };
 
 class Database {

@@ -5,9 +5,12 @@
 #include <csignal>
 #include <cstdlib>
 #include <pthread.h>
+#include <sys/stat.h>
 #include <thread>
 
 int main(int argc, char* argv[]) {
+    // Database/WAL/key files are private service state by default.
+    umask(0077);
     sigset_t signals;
     sigemptyset(&signals);
     sigaddset(&signals, SIGINT);

@@ -63,7 +63,10 @@ def deliver(payload: bytes) -> None:
 
 
 def main() -> int:
-    raw = sys.stdin.read()
+    # SMTP messages are arbitrary bytes, not guaranteed valid UTF-8. Decode
+    # lossily at the transport boundary so one malformed byte cannot crash the
+    # handler with exit 1 and permanently lose/reject the delivery.
+    raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
     if not raw.strip():
         print("TempMail handler received an empty message", file=sys.stderr)
         return 75
@@ -89,6 +92,7 @@ def main() -> int:
             "to": recipient,
             "subject": extract_header(raw, "Subject"),
             "body": body,
+            "raw": raw,
             "html": "",
         },
         ensure_ascii=False,

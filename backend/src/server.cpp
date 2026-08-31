@@ -189,17 +189,36 @@ void TempMailServer::start() {
 
     // POST /api/alias - Generate new alias (random or custom, with duration)
     svr.Post("/api/alias", [this](const httplib::Request& req, httplib::Response& res) {
-        // Parse request body
+        // Parse request strictly. Empty body is a supported shortcut for a
+        // default 24h alias; malformed/non-object/wrong-type JSON is rejected
+        // instead of silently creating an unintended alias.
         std::string custom_email;
-        std::string duration = "24h"; // default
+        std::string duration = "24h";
         if (req.has_param("email")) custom_email = req.get_param_value("email");
         if (req.has_param("duration")) duration = req.get_param_value("duration");
         if (!req.body.empty()) {
             try {
                 auto j = json::parse(req.body);
-                if (j.contains("email")) custom_email = j["email"].get<std::string>();
-                if (j.contains("duration")) duration = j["duration"].get<std::string>();
-            } catch (...) {}
+                if (!j.is_object()) throw std::invalid_argument("JSON body must be an object");
+                if (j.contains("email")) {
+                    if (!j["email"].is_string()) throw std::invalid_argument("email must be a string");
+                    custom_email = j["email"].get<std::string>();
+                }
+                if (j.contains("duration")) {
+                    if (!j["duration"].is_string()) throw std::invalid_argument("duration must be a string");
+                    duration = j["duration"].get<std::string>();
+                }
+            } catch (const std::exception&) {
+                res.status = 400;
+                res.set_content(R"({"error":"Invalid JSON body"})", "application/json");
+                return;
+            }
+        }
+        if (duration != "1h" && duration != "24h" && duration != "7d" &&
+            duration != "30d" && duration != "forever") {
+            res.status = 400;
+            res.set_content(R"({"error":"Invalid duration"})", "application/json");
+            return;
         }
 
         // Calculate expiry from duration
@@ -212,11 +231,12 @@ void TempMailServer::start() {
             else if (duration == "24h") hours = 24;
             else if (duration == "7d") hours = 24 * 7;
             else if (duration == "30d") hours = 24 * 30;
-            else { try { hours = std::stoll(duration); } catch (...) {} }
             auto now = std::chrono::system_clock::now() + std::chrono::hours(hours);
             auto time = std::chrono::system_clock::to_time_t(now);
+            struct tm utc_time {};
+            gmtime_r(&time, &utc_time);
             std::ostringstream oss;
-            oss << std::put_time(std::gmtime(&time), "%Y-%m-%dT%H:%M:%SZ");
+            oss << std::put_time(&utc_time, "%Y-%m-%dT%H:%M:%SZ");
             expires_at = oss.str();
         }
 
@@ -239,6 +259,14 @@ void TempMailServer::start() {
             }
             const std::string api_key = generate_api_key();
             auto a = db_.create_alias(custom_email, expires_at, api_key);
+            // Re-check the INSERT result: another request can win the unique
+            // email race between get_alias() and create_alias(). Never return
+            // 200 with an unusable key when SQLite rejected the insert.
+            if (a.id.empty()) {
+                res.status = 409;
+                res.set_content(R"({"error":"Alias already exists"})", "application/json");
+                return;
+            }
             json j = {{"id", a.id}, {"email", a.email}, {"expires_at", a.expires_at}, {"api_key", api_key}};
             res.set_header("Cache-Control", "no-store");
             res.set_content(j.dump(), "application/json");
@@ -275,6 +303,8 @@ void TempMailServer::start() {
     });
 
     // GET /api/messages - Automation inbox resolved only from API key.
+    // Returns metadata by default (id/from/subject/date); bodies are fetched
+    // per email via /api/email/<id>. Pass ?full=1 for complete bodies.
     svr.Get("/api/messages", [this](const httplib::Request& req, httplib::Response& res) {
         const std::string api_key = get_api_key(req);
         auto alias = db_.get_alias_by_api_key(api_key);
@@ -285,14 +315,19 @@ void TempMailServer::start() {
             res.set_content(R"({"error":"Invalid 'after' parameter"})", "application/json");
             return;
         }
-        auto emails = db_.get_emails(alias->id, after);
+        bool include_bodies = req.has_param("full");
+        auto emails = db_.get_emails(alias->id, after, include_bodies);
         db_.mark_alias_read(alias->id);
         json arr = json::array();
         for (const auto& e : emails) {
-            arr.push_back({{"id", e.id}, {"from_address", e.from_address},
-                           {"subject", e.subject}, {"body_text", e.body_text},
-                           {"body_html", e.body_html}, {"received_at", e.received_at},
-                           {"is_read", e.is_read}});
+            json item = {{"id", e.id}, {"from_address", e.from_address},
+                         {"subject", e.subject}, {"received_at", e.received_at},
+                         {"is_read", e.is_read}};
+            if (include_bodies) {
+                item["body_text"] = e.body_text;
+                item["body_html"] = e.body_html;
+            }
+            arr.push_back(item);
         }
         res.set_header("Cache-Control", "no-store");
         res.set_content(json({{"email", alias->email}, {"emails", arr}}).dump(), "application/json");
@@ -315,16 +350,21 @@ void TempMailServer::start() {
             return;
         }
 
-        auto emails = db_.get_emails(alias->id, after);
+        // Inbox listings are metadata-only; bodies load per email on open.
+        auto emails = db_.get_emails(alias->id, after, req.has_param("full"));
         std::cout << "[EMAILS] " << email << " -> " << emails.size() << " emails found" << std::endl;
         db_.mark_alias_read(alias->id);
 
         json arr = json::array();
         for (const auto& e : emails) {
-            arr.push_back({{"id", e.id}, {"from_address", e.from_address},
-                          {"subject", e.subject}, {"body_text", e.body_text},
-                          {"body_html", e.body_html}, {"received_at", e.received_at},
-                          {"is_read", e.is_read}});
+            json item = {{"id", e.id}, {"from_address", e.from_address},
+                         {"subject", e.subject}, {"received_at", e.received_at},
+                         {"is_read", e.is_read}};
+            if (req.has_param("full")) {
+                item["body_text"] = e.body_text;
+                item["body_html"] = e.body_html;
+            }
+            arr.push_back(item);
         }
         json j = {{"emails", arr}};
         res.set_content(j.dump(), "application/json");
@@ -414,7 +454,8 @@ void TempMailServer::start() {
             return;
         }
 
-        auto emails = db_.get_emails(alias->id, after);
+        // Check/list endpoint only needs metadata; skip body decryption.
+        auto emails = db_.get_emails(alias->id, after, false);
         json arr = json::array();
         for (const auto& e : emails) {
             arr.push_back({{"id", e.id}, {"from_address", e.from_address},
@@ -433,7 +474,12 @@ void TempMailServer::start() {
             std::string from = decode_mime_header(j.value("from", "unknown"));
             std::string subject = decode_mime_header(j.value("subject", "(No subject)"));
             std::string body = j.value("body", "");
+            std::string raw = j.value("raw", "");
             std::string html = j.value("html", "");
+            // Postfix supplies the full raw message so top-level MIME headers
+            // (boundary/transfer encoding) remain available. Cloudflare/API
+            // callers without `raw` keep the existing body/html path.
+            const std::string& mime_source = raw.empty() ? body : raw;
 
             if (to.empty()) {
                 res.status = 400;
@@ -441,23 +487,10 @@ void TempMailServer::start() {
                 return;
             }
 
-            // Write ALL incoming emails to admin mbox for Roundcube
-            std::string mbox = "/var/mail/admin";
-            FILE* f = fopen(mbox.c_str(), "a");
-            if (f) {
-                time_t now = time(nullptr);
-                struct tm* t = gmtime(&now);
-                char datebuf[64];
-                strftime(datebuf, sizeof(datebuf), "%a %b %d %H:%M:%S %Y", t);
-                fprintf(f, "From %s %s\n", from.c_str(), datebuf);
-                fprintf(f, "From: %s\n", from.c_str());
-                fprintf(f, "To: %s\n", to.c_str());
-                fprintf(f, "Subject: %s\n", subject.c_str());
-                fprintf(f, "Content-Type: text/plain; charset=UTF-8\n");
-                fprintf(f, "\n%s\n\n", body.c_str());
-                fclose(f);
-            }
-
+            // Do not mirror messages into /var/mail/admin: that plaintext mbox
+            // bypasses the AES-256-GCM at-rest guarantee and lets requests for
+            // nonexistent aliases consume disk. The encrypted SQLite inbox is
+            // the sole application datastore.
             auto alias = db_.get_alias(to);
             if (!alias) {
                 res.set_content(R"({"success":true,"message":"No matching alias"})", "application/json");
@@ -468,8 +501,8 @@ void TempMailServer::start() {
             std::string raw_stored = body;
             
             // ── Extract MIME parts ──
-            std::string html_part = extract_html_body(body);
-            std::string text_part = extract_text_body(body);
+            std::string html_part = extract_html_body(mime_source);
+            std::string text_part = extract_text_body(mime_source);
             
             // ── body_html: best HTML we can find ──
             std::string clean_html;
@@ -480,8 +513,10 @@ void TempMailServer::start() {
             } else if (!html.empty() && html.find("<") != std::string::npos) {
                 clean_html = html;
             }
-            clean_html = quoted_printable_decode(clean_html);
-            
+            // MIME part extraction already applies its declared transfer
+            // encoding exactly once. Never QP-decode the result again: a
+            // literal '=3D41' must become '=41', not 'A'.
+
             // ── body_text: best plain text we can find ──
             std::string clean_body;
             if (!text_part.empty()) {
@@ -494,8 +529,7 @@ void TempMailServer::start() {
             if (clean_body.empty() && !body.empty()) {
                 clean_body = strip_html_tags(body);
             }
-            clean_body = quoted_printable_decode(clean_body);
-            
+
             // ── Final: if html is empty but body has HTML, use raw body ──
             if (clean_html.empty() && clean_body.find("<") != std::string::npos) {
                 clean_html = clean_body;
@@ -560,9 +594,9 @@ void TempMailServer::start() {
             std::cout << "[INCOMING] " << from << " -> " << to << " (" << subject << ") id=" << id << std::endl;
 
             res.set_content(R"({"success":true})", "application/json");
-        } catch (const std::exception& e) {
+        } catch (const std::exception&) {
             res.status = 400;
-            res.set_content("{\"error\":\"" + std::string(e.what()) + "\"}", "application/json");
+            res.set_content(R"({"error":"Invalid incoming payload"})", "application/json");
         }
     });
 
@@ -646,7 +680,9 @@ void TempMailServer::start() {
             event_lock.unlock();
             auto emails = db_.get_emails(alias->id, after);
             if (!emails.empty()) {
-                const auto& e = emails[0];
+                // get_emails is newest-first; return the oldest unseen item so
+                // a burst cannot skip earlier messages when the client advances `after`.
+                const auto& e = emails.back();
                 json j = {{"id", e.id}, {"email", alias->email}, {"from_address", e.from_address},
                           {"subject", e.subject}, {"body_text", e.body_text},
                           {"body_html", e.body_html}, {"received_at", e.received_at},
@@ -694,7 +730,9 @@ void TempMailServer::start() {
             event_lock.unlock();
             auto emails = db_.get_emails(alias->id, after);
             if (!emails.empty()) {
-                const auto& e = emails[0];
+                // get_emails is newest-first; return the oldest unseen item so
+                // a burst cannot skip earlier messages when the client advances `after`.
+                const auto& e = emails.back();
                 json j = {
                     {"id", e.id}, {"from_address", e.from_address},
                     {"subject", e.subject}, {"body_text", e.body_text},
@@ -768,6 +806,13 @@ void TempMailServer::start() {
     svr.Get("/api/health", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(R"({"status":"ok","server":"tempmail-cpp"})", "application/json");
     });
+
+    // Clean expired aliases immediately on startup; do not leave stale inboxes
+    // active for up to the first hourly cleanup interval.
+    const int initial_cleaned = db_.cleanup_expired();
+    if (initial_cleaned > 0) {
+        std::cout << "[CLEANUP] Removed " << initial_cleaned << " expired aliases on startup" << std::endl;
+    }
 
     // Interruptible cleanup thread (one wakeup per hour, no detached lifetime).
     cleanup_thread_ = std::thread([this]() {
