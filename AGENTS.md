@@ -59,6 +59,8 @@ Never commit or modify without explicit task scope:
 
 Do not remove `backend/include/httplib.h`, `backend/include/json.hpp`, or the checked-in SQLite amalgamation without replacing the dependency mechanism and updating build instructions.
 
+- Kyber key material (`keys/`, `*.kyber-envelope`, `mlkem768.sk`) — production secrets; never commit or delete without explicit instruction.
+
 ## Dependencies
 
 - CMake 3.16+

@@ -50,6 +50,8 @@ Never touch or commit:
 
 Do not reintroduce iframe rendering, polling-based height measurement, ResizeObserver on email bodies, large blur filters, or forced `will-change` layers for email content.
 
+- Kyber key material (`keys/`, `*.kyber-envelope`, `mlkem768.sk`) — production secrets; never commit or delete without explicit instruction.
+
 ## Dependencies
 
 - CMake 3.16+

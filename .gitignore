@@ -44,3 +44,9 @@ __pycache__/
 .idea/
 .DS_Store
 *.swp
+
+# Kyber key material / crypto envelopes
+keys/
+*.kyber-envelope
+mlkem768.pk
+mlkem768.sk

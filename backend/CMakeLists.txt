@@ -32,6 +32,23 @@ target_compile_definitions(sqlite3_minimal PRIVATE
 target_compile_options(sqlite3_minimal PRIVATE -Os -ffunction-sections -fdata-sections -flto)
 target_include_directories(sqlite3_minimal PUBLIC ${CMAKE_SOURCE_DIR}/third_party)
 
+# ML-KEM-768 (Kyber, PQClean reference implementation)
+add_library(kyber768 STATIC
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/cbd.c
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/indcpa.c
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/kem.c
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/ntt.c
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/poly.c
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/polyvec.c
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/reduce.c
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/symmetric-shake.c
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/verify.c
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/fips202.c
+    ${CMAKE_SOURCE_DIR}/third_party/kyber768/randombytes.c
+)
+target_include_directories(kyber768 PUBLIC ${CMAKE_SOURCE_DIR}/third_party/kyber768)
+target_compile_options(kyber768 PRIVATE -O2 -w)
+
 find_package(Threads REQUIRED)
 
 include_directories(
@@ -44,11 +61,13 @@ add_executable(tempmail-server
     src/server.cpp
     src/database.cpp
     src/email_parser.cpp
+    src/crypto.cpp
 )
 
 target_link_libraries(tempmail-server
     Threads::Threads
     sqlite3_minimal
+    kyber768
     ssl crypto
     dl
 )

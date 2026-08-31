@@ -27,7 +27,10 @@ struct Email {
 
 class Database {
 public:
-    Database(const std::string& db_path);
+    // master_key enables at-rest encryption (AES-256-GCM) for email fields
+    // and salted HMAC storage for API keys. Empty key disables encryption
+    // (legacy/test mode).
+    Database(const std::string& db_path, const std::string& master_key = "");
     ~Database();
 
     Alias create_alias(const std::string& email, const std::string& expires_at,
@@ -52,6 +55,7 @@ public:
 
 private:
     struct sqlite3* db_;
+    std::string master_key_;
     mutable std::mutex mutex_;
     void init_schema();
 };

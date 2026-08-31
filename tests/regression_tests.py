@@ -16,12 +16,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 BASE_URL = os.environ.get("TEMPMAIL_TEST_URL", "http://127.0.0.1:3001")
-DB_PATH = Path(os.environ.get("TEMPMAIL_TEST_DB", str(REPO_ROOT / "backend/data/tempmail.db")))
-SERVER_SOURCE = Path(os.environ.get("TEMPMAIL_SERVER_SOURCE", str(REPO_ROOT / "backend/src/server.cpp")))
-DATABASE_SOURCE = Path(os.environ.get("TEMPMAIL_DATABASE_SOURCE", str(REPO_ROOT / "backend/src/database.cpp")))
-HANDLER_PATH = Path(os.environ.get("TEMPMAIL_HANDLER_PATH", str(REPO_ROOT / "scripts/tempmail-handler")))
+DB_PATH = Path(os.environ.get("TEMPMAIL_TEST_DB", "/opt/tempmail/backend/data/tempmail.db"))
+SERVER_SOURCE = Path("/opt/tempmail/backend/src/server.cpp")
+DATABASE_SOURCE = Path("/opt/tempmail/backend/src/database.cpp")
+HANDLER_PATH = Path("/usr/local/bin/tempmail-handler")
 
 
 def request(path: str, *, method: str = "GET", payload: dict | None = None,
@@ -57,7 +56,7 @@ def test_invalid_numeric_parameters_return_400() -> None:
 
 
 def test_custom_alias_rejects_external_domain() -> None:
-    status, _ = request("/api/alias", method="POST", payload={"email": "user@invalid.example", "duration": "1h"})
+    status, _ = request("/api/alias", method="POST", payload={"email": "user@example.com", "duration": "1h"})
     assert status == 400, status
 
 
@@ -119,12 +118,12 @@ def test_handler_propagates_delivery_failure() -> None:
 
 
 def test_frontend_renders_email_unmodified() -> None:
-    source = (REPO_ROOT / "frontend-svelte/src/lib/helpers.ts").read_text()
+    source = Path("/opt/tempmail/frontend-svelte/src/lib/helpers.ts").read_text()
     # Render-as-received policy: no sanitization, no stripping.
     assert "buildEmailDocument" in source
     # Shadow DOM host replaces the old iframe (same compositor tree as the
     # page — no iframe layer rasterization stalls while scrolling on phones).
-    assert "email-shadow-host" in (REPO_ROOT / "frontend-svelte/src/App.svelte").read_text()
+    assert "email-shadow-host" in Path("/opt/tempmail/frontend-svelte/src/App.svelte").read_text()
     # Plain text must never be blank when body_text exists (short OTP included).
     assert "kind: 'text'" in source
     assert "renderPlainText" in source

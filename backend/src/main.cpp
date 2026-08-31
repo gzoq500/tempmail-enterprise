@@ -1,5 +1,6 @@
 #include "server.h"
 #include "database.h"
+#include "crypto.h"
 #include <iostream>
 #include <csignal>
 #include <cstdlib>
@@ -38,8 +39,20 @@ int main(int argc, char* argv[]) {
     }
 
     try {
+        // Load or create the Kyber-protected master key before opening the DB:
+        // email fields and API-key hashing all derive from it. The key material
+        // lives next to the database (configurable) and never inside the DB.
+        const char* env_keys = std::getenv("TEMPMAIL_KEY_DIR");
+        std::string key_dir = env_keys ? env_keys : (db_path.substr(0, db_path.find_last_of('/')) + "/keys");
+        std::cout << "Initializing crypto (ML-KEM-768 envelope)..." << std::endl;
+        std::string master_key;
+        if (!tempmail_crypto::load_or_create_master_key(key_dir + "/master", key_dir, master_key)) {
+            std::cerr << "Fatal: cannot load or create the Kyber master key envelope in " << key_dir << std::endl;
+            return 1;
+        }
+
         std::cout << "Initializing database: " << db_path << std::endl;
-        Database db(db_path);
+        Database db(db_path, master_key);
 
         std::cout << "Starting server..." << std::endl;
         TempMailServer server(db, domain, port);
