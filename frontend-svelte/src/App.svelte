@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { generateAlias, generateCustomAlias, getAliases, getEmails, deleteAlias, waitForNewEmail, sendEmail, getAliasApiKey } from './lib/api';
+  import { generateAlias, generateCustomAlias, getAliases, getEmails, deleteAlias, waitForNewEmail, sendEmail, getAliasApiKey, importAliasKey } from './lib/api';
   import { formatSender, buildEmailDocument, renderPlainText, fmtDate, DURATIONS } from './lib/helpers';
 
   let aliases = [];
@@ -24,6 +24,11 @@
   let sendError = '';
   let sending = false;
   let changeUsername = '';
+  let showOpen = false;
+  let openEmailInput = '';
+  let openKeyInput = '';
+  let openError = '';
+  let opening = false;
   $: emailView = selectedEmail ? buildEmailDocument(selectedEmail.body_html, selectedEmail.body_text) : null;
 
   async function loadAliases() { try { aliases = (await getAliases()).aliases; } catch {} }
@@ -57,6 +62,16 @@
   async function handleDelete(email) { if (!confirm('Hapus email ini?')) return; await deleteAlias(email); if (activeAlias?.email === email) { activeAlias = null; emails = []; selectedEmail = null; stopPolling(); } await loadAliases(); }
   async function handleCustomEmail() { loading = true; try { const em = changeUsername ? changeUsername + '@' + emailDomain : ''; const d = em ? await generateCustomAlias(em, duration) : await generateAlias(duration); if (d.email) { activeAlias = d; selectedEmail = null; emails = []; lastEmailId = 0; await loadAliases(); await loadEmails(d.email); startPolling(); } } catch {} loading = false; showChange = false; changeUsername = ''; }
   function handleRandom() { const names = ['andi','budi','citra','dewi','eko','fajar','gilang','hadi','indra','joko','kurnia','lukman','maman','nanda','opik','pratama','rahmat','sandi','taufik','udin','vicky','wahyu','yusuf','zainal','bayu','candra','dian','erwin','fauzi','gunawan']; const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'; const name = names[Math.floor(Math.random() * names.length)]; let s = ''; for (let i = 0; i < 3; i++) s += chars[Math.floor(Math.random() * chars.length)]; changeUsername = name + s; }
+  async function handleOpenInbox() {
+    opening = true; openError = '';
+    try {
+      const alias = await importAliasKey(openEmailInput, openKeyInput);
+      activeAlias = alias; selectedEmail = null; emails = []; lastEmailId = 0;
+      await loadAliases(); await loadEmails(alias.email); startPolling();
+      showOpen = false; openEmailInput = ''; openKeyInput = '';
+    } catch (e) { openError = e?.message || 'Gagal membuka inbox'; }
+    opening = false;
+  }
   async function handleSend() { sending = true; sendError = ''; try { const r = await sendEmail(sendFrom, sendName, sendTo, sendSubject, sendBody); if (r.success) { showSend = false; showToastMessage(); } else sendError = r.error || 'Gagal'; } catch { sendError = 'Error'; } sending = false; }
   function selectAlias(a) { activeAlias = a; selectedEmail = null; loadEmails(a.email); startPolling(); if (a.email.split('@')[1]) emailDomain = a.email.split('@')[1]; }
   let pollingGeneration = 0;
@@ -148,6 +163,10 @@
           <button on:click={handleGenerate} disabled={loading} class="inline-flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-medium rounded-xl transition-all disabled:opacity-50">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
             {loading ? 'Generating...' : 'Generate Email Baru'}
+          </button>
+          <button on:click={() => showOpen = true} class="inline-flex items-center gap-2 px-6 py-3 bg-gray-800/60 hover:bg-gray-700/60 text-gray-300 font-medium rounded-xl border border-gray-700/50 transition-all">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+            Buka Inbox dengan Key
           </button>
         </div>
       {/if}
@@ -264,6 +283,27 @@
       </div>
     {/if}
   </div>
+
+  {#if showOpen}
+    <div role="presentation" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" on:click|self={() => showOpen = false}>
+      <div role="dialog" aria-modal="true" aria-labelledby="open-dialog-title" class="bg-gray-900 border border-gray-700 w-full max-w-sm p-5 rounded-2xl">
+        <div class="flex items-center justify-between mb-2">
+          <h3 id="open-dialog-title" class="text-lg font-bold text-gray-100">Buka Inbox dengan Key</h3>
+          <button on:click={() => showOpen = false} class="text-gray-400 hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+        <p class="text-xs text-gray-500 mb-4">Lihat pesan email inbox dari browser atau perangkat lain menggunakan email + API key.</p>
+        <form on:submit|preventDefault={handleOpenInbox} class="space-y-3">
+          <input id="open-email" type="email" bind:value={openEmailInput} placeholder="nama@routerssh.web.id" required class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm focus:outline-none focus:border-purple-500" />
+          <input id="open-key" type="text" bind:value={openKeyInput} placeholder="temp-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm font-mono focus:outline-none focus:border-purple-500" />
+          {#if openError}<div class="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl p-3">{openError}</div>{/if}
+          <button type="submit" disabled={opening} class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-medium rounded-xl transition-all disabled:opacity-50">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+            {opening ? 'Membuka...' : 'Buka Inbox'}
+          </button>
+        </form>
+      </div>
+    </div>
+  {/if}
 
   {#if showChange}
     <div role="presentation" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" on:click|self={() => showChange = false}>
