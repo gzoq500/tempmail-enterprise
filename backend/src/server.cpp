@@ -55,14 +55,20 @@ bool is_valid_email(const std::string& email) {
 }
 
 std::string generate_api_key() {
+    // Short base62 key, e.g. temp-2HvyZULQcsSjaDdtjCUxh5wpJo9dRDKWbb.
+    // 34 base62 chars ≈ 202 bits of entropy. Rejection sampling keeps the
+    // distribution uniform (no modulo bias).
+    static constexpr char alphabet[] =
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    static constexpr size_t ALPHABET_SIZE = 62;
+    static constexpr unsigned int MAX_ACCEPT = 256 - (256 % ALPHABET_SIZE); // 248
     std::random_device entropy;
-    static constexpr char hex[] = "0123456789abcdef";
     std::string key = "temp-";
-    key.reserve(69);
-    for (int i = 0; i < 32; ++i) {
+    key.reserve(39);
+    while (key.size() < 39) {
         const unsigned int byte = entropy() & 0xffU;
-        key.push_back(hex[(byte >> 4) & 0x0fU]);
-        key.push_back(hex[byte & 0x0fU]);
+        if (byte >= MAX_ACCEPT) continue;  // reject to stay uniform
+        key.push_back(alphabet[byte % ALPHABET_SIZE]);
     }
     return key;
 }

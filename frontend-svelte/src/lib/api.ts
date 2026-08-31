@@ -71,7 +71,7 @@ export async function generateAlias(duration: string = '24h'): Promise<Alias> {
   });
   if (!res.ok) throw new Error('Failed to generate alias');
   const alias: Alias = await res.json();
-  if (!alias.api_key?.startsWith('temp-')) throw new Error('Server did not return an API key');
+  if (!alias.api_key || !/^temp-[A-Za-z0-9]{34}$/.test(alias.api_key)) throw new Error('Server did not return a valid API key');
   storeAliasKey(alias.email, alias.api_key);
   return alias;
 }
@@ -84,7 +84,7 @@ export async function generateCustomAlias(email: string, duration: string): Prom
   });
   if (!res.ok) throw new Error('Failed to generate custom alias');
   const alias: Alias = await res.json();
-  if (!alias.api_key?.startsWith('temp-')) throw new Error('Server did not return an API key');
+  if (!alias.api_key || !/^temp-[A-Za-z0-9]{34}$/.test(alias.api_key)) throw new Error('Server did not return a valid API key');
   storeAliasKey(alias.email, alias.api_key);
   return alias;
 }

@@ -31,8 +31,9 @@ def create_alias() -> tuple[str, str]:
     assert status == 200, (status, body)
     data = json.loads(body)
     key = data.get("api_key", "")
-    assert key.startswith("temp-"), key
-    assert len(key) >= 37, len(key)
+    # Short base62 format, e.g. temp-2HvyZULQcsSjaDdtjCUxh5wpJo9dRDKWbb
+    import re
+    assert re.fullmatch(r"temp-[A-Za-z0-9]{34}", key), key
     return data["email"], key
 
 
