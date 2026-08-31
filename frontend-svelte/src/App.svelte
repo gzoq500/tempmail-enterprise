@@ -174,7 +174,7 @@
     </div>
   </section>
 
-  <div class="max-w-lg mx-auto px-4 pb-20 space-y-4">
+  <div class="max-w-lg w-full min-w-0 mx-auto px-4 pb-20 space-y-4 overflow-x-hidden">
     {#if activeAlias}
       <div class="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
         <div class="px-4 py-3 bg-gray-800/80 border-b border-gray-700/50 space-y-2.5">

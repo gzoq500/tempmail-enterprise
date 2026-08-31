@@ -13,8 +13,21 @@ body {
   text-rendering: optimizeSpeed;
 }
 
-/* The email iframe document never scrolls itself (height is auto-fit),
-   so kill its scrollbars/pull-to-refresh to avoid nested-scroll jank. */
+/* Constrain wide sender-authored email layouts to their own scroll area.
+   The app page/card stays viewport-width; only the email moves left/right. */
+.email-shadow-host {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+}
+
+/* Legacy iframe rules retained for rollback compatibility. */
 iframe[title="Email content"] {
   overscroll-behavior: contain;
   /* NO will-change here: on mobile a 1800px+ iframe forced into its own

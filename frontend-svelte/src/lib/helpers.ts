@@ -74,9 +74,11 @@ export function formatSender(raw: string): string {
 // but lives in the same compositor tree as the page — no separate layer,
 // no cross-frame rasterization stalls while scrolling on mobile.
 const SHADOW_FIT_CSS =
-  ':host{display:block;max-width:100%;overflow-wrap:break-word;word-wrap:break-word;background:#fff;}' +
-  'img,video{max-width:100%!important;height:auto!important;}' +
-  'table,td{max-width:100%!important;}' +
+  // Preserve sender-authored fixed widths. When content is wider than the
+  // mobile card, expose native horizontal scrolling in both directions
+  // instead of clipping or forcibly shrinking the layout.
+  ':host{display:block;max-width:100%;overflow-x:auto;overflow-y:visible;overflow-wrap:break-word;word-wrap:break-word;background:#fff;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x pan-y;}' +
+  'img,video{max-width:100%;height:auto;}' +
   '*,*::before,*::after{animation:none!important;transition:none!important;}';
 
 export function buildEmailDocument(html?: string, text?: string): EmailView {
