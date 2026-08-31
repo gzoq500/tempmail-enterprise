@@ -333,11 +333,15 @@ int Database::store_email(const std::string& alias_id, const std::string& from,
         sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
         return -1;
     }
-    const std::string e_from = tempmail_crypto::encrypt_field(master_key_, rid + ":from", from);
-    const std::string e_to = tempmail_crypto::encrypt_field(master_key_, rid + ":to", to);
-    const std::string e_subject = tempmail_crypto::encrypt_field(master_key_, rid + ":subj", subject);
-    const std::string e_text = tempmail_crypto::encrypt_field(master_key_, rid + ":text", body_text);
-    const std::string e_html = tempmail_crypto::encrypt_field(master_key_, rid + ":html", body_html);
+    // Write with the row-key scheme (one HKDF, five random-nonce GCM blobs).
+    // Reads try this first; the per-field scheme remains only as a read
+    // fallback for rows written before the batching optimization.
+    const std::string row_key = tempmail_crypto::derive_row_key_public(master_key_, rid);
+    const std::string e_from = tempmail_crypto::encrypt_field_with_key(row_key, from);
+    const std::string e_to = tempmail_crypto::encrypt_field_with_key(row_key, to);
+    const std::string e_subject = tempmail_crypto::encrypt_field_with_key(row_key, subject);
+    const std::string e_text = tempmail_crypto::encrypt_field_with_key(row_key, body_text);
+    const std::string e_html = tempmail_crypto::encrypt_field_with_key(row_key, body_html);
     sqlite3_bind_text(stmt, 1, e_from.c_str(), static_cast<int>(e_from.size()), SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, e_to.c_str(), static_cast<int>(e_to.size()), SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, e_subject.c_str(), static_cast<int>(e_subject.size()), SQLITE_TRANSIENT);
@@ -373,23 +377,31 @@ std::vector<Email> Database::get_emails(const std::string& alias_id, int after_i
         e.id = sqlite3_column_int(stmt, 0);
         e.alias_id = column_blob(stmt, 1);
         const std::string rid = std::to_string(e.id);
-        // Encrypted rows decrypt via the master key; legacy rows that predate
-        // encryption fail decryption and are returned as-is (plaintext).
+        // One HKDF derivation per row; all five fields decrypt with this key
+        // (each blob carries its own random GCM nonce).
+        const std::string row_key = tempmail_crypto::derive_row_key_public(master_key_, rid);
         std::string tmp;
         const std::string raw_from = column_blob(stmt, 2);
-        if (!tempmail_crypto::decrypt_field(master_key_, rid + ":from", raw_from, tmp)) tmp = raw_from;
+        // Row-key scheme first; fall back to the older per-field derivation
+        // for rows written before the batching change, then to plaintext.
+        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_from, tmp) &&
+            !tempmail_crypto::decrypt_field(master_key_, rid + ":from", raw_from, tmp)) tmp = raw_from;
         e.from_address = tmp;
         const std::string raw_to = column_blob(stmt, 3);
-        if (!tempmail_crypto::decrypt_field(master_key_, rid + ":to", raw_to, tmp)) tmp = raw_to;
+        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_to, tmp) &&
+            !tempmail_crypto::decrypt_field(master_key_, rid + ":to", raw_to, tmp)) tmp = raw_to;
         e.to_address = tmp;
         const std::string raw_subj = column_blob(stmt, 4);
-        if (!tempmail_crypto::decrypt_field(master_key_, rid + ":subj", raw_subj, tmp)) tmp = raw_subj;
+        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_subj, tmp) &&
+            !tempmail_crypto::decrypt_field(master_key_, rid + ":subj", raw_subj, tmp)) tmp = raw_subj;
         e.subject = tmp;
         const std::string raw_text = column_blob(stmt, 5);
-        if (!tempmail_crypto::decrypt_field(master_key_, rid + ":text", raw_text, tmp)) tmp = raw_text;
+        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_text, tmp) &&
+            !tempmail_crypto::decrypt_field(master_key_, rid + ":text", raw_text, tmp)) tmp = raw_text;
         e.body_text = tmp;
         const std::string raw_html = column_blob(stmt, 6);
-        if (!tempmail_crypto::decrypt_field(master_key_, rid + ":html", raw_html, tmp)) tmp = raw_html;
+        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_html, tmp) &&
+            !tempmail_crypto::decrypt_field(master_key_, rid + ":html", raw_html, tmp)) tmp = raw_html;
         e.body_html = tmp;
         e.received_at = column_blob(stmt, 7);
         e.is_read = sqlite3_column_int(stmt, 8) != 0;
@@ -411,21 +423,27 @@ std::optional<Email> Database::get_email(int id) {
         e.id = sqlite3_column_int(stmt, 0);
         e.alias_id = column_blob(stmt, 1);
         const std::string rid = std::to_string(e.id);
+        const std::string row_key = tempmail_crypto::derive_row_key_public(master_key_, rid);
         std::string tmp;
         const std::string raw_from = column_blob(stmt, 2);
-        if (!tempmail_crypto::decrypt_field(master_key_, rid + ":from", raw_from, tmp)) tmp = raw_from;
+        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_from, tmp) &&
+            !tempmail_crypto::decrypt_field(master_key_, rid + ":from", raw_from, tmp)) tmp = raw_from;
         e.from_address = tmp;
         const std::string raw_to = column_blob(stmt, 3);
-        if (!tempmail_crypto::decrypt_field(master_key_, rid + ":to", raw_to, tmp)) tmp = raw_to;
+        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_to, tmp) &&
+            !tempmail_crypto::decrypt_field(master_key_, rid + ":to", raw_to, tmp)) tmp = raw_to;
         e.to_address = tmp;
         const std::string raw_subj = column_blob(stmt, 4);
-        if (!tempmail_crypto::decrypt_field(master_key_, rid + ":subj", raw_subj, tmp)) tmp = raw_subj;
+        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_subj, tmp) &&
+            !tempmail_crypto::decrypt_field(master_key_, rid + ":subj", raw_subj, tmp)) tmp = raw_subj;
         e.subject = tmp;
         const std::string raw_text = column_blob(stmt, 5);
-        if (!tempmail_crypto::decrypt_field(master_key_, rid + ":text", raw_text, tmp)) tmp = raw_text;
+        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_text, tmp) &&
+            !tempmail_crypto::decrypt_field(master_key_, rid + ":text", raw_text, tmp)) tmp = raw_text;
         e.body_text = tmp;
         const std::string raw_html = column_blob(stmt, 6);
-        if (!tempmail_crypto::decrypt_field(master_key_, rid + ":html", raw_html, tmp)) tmp = raw_html;
+        if (!tempmail_crypto::decrypt_field_with_key(row_key, raw_html, tmp) &&
+            !tempmail_crypto::decrypt_field(master_key_, rid + ":html", raw_html, tmp)) tmp = raw_html;
         e.body_html = tmp;
         e.received_at = column_blob(stmt, 7);
         e.is_read = sqlite3_column_int(stmt, 8) != 0;

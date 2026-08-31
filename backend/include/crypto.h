@@ -42,6 +42,13 @@ std::string encrypt_field(const std::string& master_key, const std::string& row_
                           const std::string& plaintext);
 bool decrypt_field(const std::string& master_key, const std::string& row_id,
                    const std::string& blob, std::string& plaintext);
+// Derive the per-row AES key directly (for batching field decrypts per row).
+std::string derive_row_key_public(const std::string& master_key, const std::string& row_id);
+// Decrypt with an already-derived row key (avoids repeat HKDF per field).
+bool decrypt_field_with_key(const std::string& row_key, const std::string& blob,
+                            std::string& plaintext);
+// Encrypt with an already-derived row key (single HKDF per row on write).
+std::string encrypt_field_with_key(const std::string& row_key, const std::string& plaintext);
 
 // --- Kyber (ML-KEM-768) master key envelope ---
 // Loads or creates <path>.pk / <path>.sk, then reads <path>.bin

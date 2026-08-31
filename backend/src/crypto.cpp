@@ -110,8 +110,15 @@ bool aes256gcm_decrypt(const std::string& key, const std::string& blob, std::str
     const size_t ct_len = blob.size() - GCM_NONCE_LEN - GCM_TAG_LEN;
     plaintext.assign(ct_len, '\0');
 
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    if (!ctx) return false;
+    // Reuse a thread-local EVP context across calls: per-call ctx alloc/free
+    // dominated decrypt latency when a request decrypts many fields (500+
+    // EVP_CIPHER_CTX_new calls for a 100-email inbox read).
+    thread_local EVP_CIPHER_CTX* tls_ctx = nullptr;
+    if (!tls_ctx) tls_ctx = EVP_CIPHER_CTX_new();
+    if (!tls_ctx) return false;
+    EVP_CIPHER_CTX* ctx = tls_ctx;
+    EVP_CIPHER_CTX_reset(ctx);
+
     bool ok = true;
     do {
         if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1) { ok = false; break; }
@@ -131,7 +138,6 @@ bool aes256gcm_decrypt(const std::string& key, const std::string& blob, std::str
             ok = false; break;
         }
     } while (false);
-    EVP_CIPHER_CTX_free(ctx);
     if (!ok) plaintext.clear();
     return ok;
 }
@@ -202,6 +208,29 @@ bool decrypt_field(const std::string& master_key, const std::string& row_id,
                    const std::string& blob, std::string& plaintext) {
     if (blob.empty()) { plaintext.clear(); return true; }
     return aes256gcm_decrypt(derive_row_key(master_key, row_id), blob, plaintext);
+}
+
+bool decrypt_field_with_key(const std::string& row_key, const std::string& blob,
+                            std::string& plaintext) {
+    if (blob.empty()) { plaintext.clear(); return true; }
+    return aes256gcm_decrypt(row_key, blob, plaintext);
+}
+
+std::string encrypt_field_with_key(const std::string& row_key, const std::string& plaintext) {
+    if (plaintext.empty()) return std::string();
+    return aes256gcm_encrypt(row_key, plaintext);
+}
+
+// Row-level helper: derive ONE key per email row; decrypt multiple fields
+// with distinct nonces. Avoids 5 HKDF derivations per row on inbox reads.
+std::string derive_row_key_public(const std::string& master_key, const std::string& row_id);
+
+}  // namespace tempmail_crypto
+
+namespace tempmail_crypto {
+
+std::string derive_row_key_public(const std::string& master_key, const std::string& row_id) {
+    return derive_row_key(master_key, row_id);
 }
 
 // --- Kyber (ML-KEM-768) master key envelope ---
