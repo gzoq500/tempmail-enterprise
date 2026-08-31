@@ -3,6 +3,7 @@
 #include <vector>
 #include <optional>
 #include <ctime>
+#include <mutex>
 
 struct Alias {
     std::string id;
@@ -33,6 +34,7 @@ public:
     std::optional<Alias> get_alias(const std::string& email);
     std::vector<Alias> get_active_aliases();
     bool delete_alias(const std::string& email);
+    int clear_emails(const std::string& email);  // Delete all emails for alias
     int cleanup_expired();
 
     int store_email(const std::string& alias_id, const std::string& from,
@@ -45,5 +47,6 @@ public:
 
 private:
     struct sqlite3* db_;
+    mutable std::mutex mutex_;
     void init_schema();
 };

@@ -69,6 +69,13 @@ export async function checkNewEmails(email: string, after: number): Promise<Chec
   return res.json();
 }
 
+export async function waitForNewEmail(email: string, after: number, timeout = 30, signal?: AbortSignal): Promise<Email | null> {
+  const res = await fetch(`${API}/wait/${encodeURIComponent(email)}?after=${after}&timeout=${timeout}`, { signal });
+  if (res.status === 408) return null;
+  if (!res.ok) throw new Error('Failed to wait for emails');
+  return res.json();
+}
+
 export async function sendEmail(from: string, name: string, to: string, subject: string, body: string): Promise<SendResponse> {
   const res = await fetch(`${API}/send`, {
     method: 'POST',

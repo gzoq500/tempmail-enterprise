@@ -3,16 +3,15 @@
 #include <iostream>
 #include <csignal>
 #include <cstdlib>
-
-static volatile bool running = true;
-
-void signal_handler(int) {
-    running = false;
-}
+#include <pthread.h>
+#include <thread>
 
 int main(int argc, char* argv[]) {
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    sigset_t signals;
+    sigemptyset(&signals);
+    sigaddset(&signals, SIGINT);
+    sigaddset(&signals, SIGTERM);
+    pthread_sigmask(SIG_BLOCK, &signals, nullptr);
 
     // Configuration from env or defaults
     const char* env_port = std::getenv("TEMPMAIL_PORT");
@@ -44,7 +43,13 @@ int main(int argc, char* argv[]) {
 
         std::cout << "Starting server..." << std::endl;
         TempMailServer server(db, domain, port);
+        std::thread signal_thread([&]() {
+            int received_signal = 0;
+            sigwait(&signals, &received_signal);
+            server.stop();
+        });
         server.start();
+        signal_thread.join();
 
     } catch (const std::exception& e) {
         std::cerr << "Fatal: " << e.what() << std::endl;

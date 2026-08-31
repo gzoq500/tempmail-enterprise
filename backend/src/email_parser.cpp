@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <regex>
 #include <vector>
+#include <cctype>
 
 // Base64 decode
 static const std::string B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -110,9 +111,15 @@ std::string decode_mime_header(const std::string& input) {
                 if (data[i] == '_') {
                     decoded += ' ';
                 } else if (data[i] == '=' && i + 2 < data.size()) {
-                    std::string hex = data.substr(i + 1, 2);
-                    decoded += (char)std::stoi(hex, nullptr, 16);
-                    i += 2;
+                    const char h1 = data[i + 1], h2 = data[i + 2];
+                    const bool valid_hex = std::isxdigit(static_cast<unsigned char>(h1)) &&
+                                           std::isxdigit(static_cast<unsigned char>(h2));
+                    if (valid_hex) {
+                        decoded += static_cast<char>(std::stoi(data.substr(i + 1, 2), nullptr, 16));
+                        i += 2;
+                    } else {
+                        decoded += data[i];
+                    }
                 } else {
                     decoded += data[i];
                 }

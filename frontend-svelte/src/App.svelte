@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { generateAlias, getAliases, getEmails, deleteAlias, checkNewEmails, sendEmail } from './lib/api';
-  import { formatSender, renderEmail, fmtDate, DURATIONS } from './lib/helpers';
+  import { generateAlias, getAliases, getEmails, deleteAlias, waitForNewEmail, sendEmail } from './lib/api';
+  import { formatSender, buildEmailDocument, renderPlainText, fmtDate, DURATIONS } from './lib/helpers';
 
   let aliases = [];
   let activeAlias = null;
@@ -24,20 +24,86 @@
   let sendError = '';
   let sending = false;
   let changeUsername = '';
+  $: emailView = selectedEmail ? buildEmailDocument(selectedEmail.body_html, selectedEmail.body_text) : null;
 
   async function loadAliases() { try { aliases = (await getAliases()).aliases; } catch {} }
   async function loadEmails(email) { try { const d = await getEmails(email); emails = d.emails; if (d.emails.length > 0) lastEmailId = Math.max(...d.emails.map(e => e.id)); } catch {} }
   async function handleGenerate() { loading = true; try { const a = await generateAlias(duration); activeAlias = a; selectedEmail = null; emails = []; lastEmailId = 0; await loadAliases(); await loadEmails(a.email); startPolling(); } catch {} loading = false; }
-  function handleCopy(email) { navigator.clipboard.writeText(email || activeAlias?.email || ''); showToast = true; setTimeout(() => showToast = false, 2000); }
+  let toastTimer = null;
+  function showToastMessage() {
+    if (toastTimer) clearTimeout(toastTimer);
+    showToast = true;
+    toastTimer = setTimeout(() => { showToast = false; toastTimer = null; }, 2000);
+  }
+  function handleCopy(email) { navigator.clipboard.writeText(email || activeAlias?.email || ''); showToastMessage(); }
   async function handleRefresh() { if (!activeAlias) return; refreshing = true; await loadEmails(activeAlias.email); setTimeout(() => refreshing = false, 800); }
   async function handleDelete(email) { if (!confirm('Hapus email ini?')) return; await deleteAlias(email); if (activeAlias?.email === email) { activeAlias = null; emails = []; selectedEmail = null; stopPolling(); } await loadAliases(); }
   async function handleCustomEmail() { loading = true; try { const em = changeUsername ? changeUsername + '@' + emailDomain : ''; const body = { duration }; if (em) body.email = em; const res = await fetch('/api/alias', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const d = await res.json(); if (d.email) { activeAlias = d; selectedEmail = null; emails = []; lastEmailId = 0; await loadAliases(); await loadEmails(d.email); startPolling(); } } catch {} loading = false; showChange = false; changeUsername = ''; }
   function handleRandom() { const names = ['andi','budi','citra','dewi','eko','fajar','gilang','hadi','indra','joko','kurnia','lukman','maman','nanda','opik','pratama','rahmat','sandi','taufik','udin','vicky','wahyu','yusuf','zainal','bayu','candra','dian','erwin','fauzi','gunawan']; const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'; const name = names[Math.floor(Math.random() * names.length)]; let s = ''; for (let i = 0; i < 3; i++) s += chars[Math.floor(Math.random() * chars.length)]; changeUsername = name + s; }
-  async function handleSend() { sending = true; sendError = ''; try { const r = await sendEmail(sendFrom, sendName, sendTo, sendSubject, sendBody); if (r.success) { showSend = false; showToast = true; setTimeout(() => showToast = false, 2000); } else sendError = r.error || 'Gagal'; } catch { sendError = 'Error'; } sending = false; }
+  async function handleSend() { sending = true; sendError = ''; try { const r = await sendEmail(sendFrom, sendName, sendTo, sendSubject, sendBody); if (r.success) { showSend = false; showToastMessage(); } else sendError = r.error || 'Gagal'; } catch { sendError = 'Error'; } sending = false; }
   function selectAlias(a) { activeAlias = a; selectedEmail = null; loadEmails(a.email); startPolling(); if (a.email.split('@')[1]) emailDomain = a.email.split('@')[1]; }
-  function startPolling() { stopPolling(); interval = setInterval(async () => { if (activeAlias && !selectedEmail) { try { const d = await checkNewEmails(activeAlias.email, lastEmailId); if (d.count > 0) loadEmails(activeAlias.email); } catch {} } }, 10000); }
-  function stopPolling() { if (interval) { clearInterval(interval); interval = null; } }
+  let pollingGeneration = 0;
+  let pollingController = null;
+  async function pollForEmails(generation) {
+    while (generation === pollingGeneration && activeAlias && !selectedEmail) {
+      pollingController = new AbortController();
+      try {
+        const email = await waitForNewEmail(activeAlias.email, lastEmailId, 30, pollingController.signal);
+        if (generation !== pollingGeneration || !activeAlias || selectedEmail) return;
+        if (email) {
+          emails = [email, ...emails.filter(e => e.id !== email.id)];
+          lastEmailId = Math.max(lastEmailId, email.id);
+        }
+      } catch {}
+    }
+  }
+  function startPolling() {
+    stopPolling();
+    const generation = pollingGeneration;
+    pollForEmails(generation);
+  }
+  function stopPolling() {
+    pollingGeneration += 1;
+    if (pollingController) { pollingController.abort(); pollingController = null; }
+    if (interval) { clearInterval(interval); interval = null; }
+  }
   function goBack() { selectedEmail = null; startPolling(); }
+
+  // Shadow DOM email mount: replaces the old iframe. Sender styles are
+  // encapsulated inside the shadow root (no leakage into the app), while
+  // the content lives in the page's own compositor tree — scrolling past
+  // it is native page scrolling with zero iframe rasterization cost.
+  function mountEmailShadow(node, html) {
+    const root = node.attachShadow({ mode: 'open' });
+    const update = (content) => {
+      root.innerHTML = content;
+      // Magic links open in a new tab (replaces the old <base target>).
+      for (const a of root.querySelectorAll('a[href]')) {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
+      }
+    };
+    update(html);
+    return {
+      update,
+      destroy() { root.innerHTML = ''; }
+    };
+  }
+
+  // Gmail-style sender avatar helpers.
+  function senderName(raw) { return formatSender(raw); }
+  function senderInitial(raw) {
+    const name = senderName(raw);
+    const clean = name.replace(/[^\p{L}\p{N}]/gu, '').trim();
+    return clean ? clean[0].toUpperCase() : '?';
+  }
+  function senderColor(raw) {
+    let hash = 0;
+    const name = senderName(raw);
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    const hue = Math.abs(hash) % 360;
+    return `hsl(${hue}, 45%, 42%)`;
+  }
 
   onMount(() => { loadAliases(); });
   onDestroy(() => { stopPolling(); });
@@ -46,8 +112,10 @@
 <main class="min-h-screen">
   <section class="relative pt-10 pb-6 text-center">
     <div class="absolute inset-0 overflow-hidden pointer-events-none">
-      <div class="absolute top-10 left-1/4 w-48 h-48 bg-purple-500/5 rounded-full blur-2xl"></div>
-      <div class="absolute top-20 right-1/4 w-64 h-64 bg-blue-500/5 rounded-full blur-2xl"></div>
+      <!-- Static radial gradients: visually identical to the old blur-2xl orbs
+           but zero GPU filter cost while scrolling on mobile. -->
+      <div class="absolute top-10 left-1/4 w-48 h-48" style="background:radial-gradient(circle,rgba(168,85,247,0.06),transparent 70%);"></div>
+      <div class="absolute top-20 right-1/4 w-64 h-64" style="background:radial-gradient(circle,rgba(59,130,246,0.06),transparent 70%);"></div>
     </div>
     <div class="relative z-10 px-4">
       <h1 class="text-4xl md:text-5xl font-bold mb-3"><span class="bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">TempMail</span></h1>
@@ -93,12 +161,26 @@
           <div class="p-4">
             <button on:click={goBack} class="flex items-center gap-2 text-purple-400 hover:text-purple-300 mb-4 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>Kembali</button>
             <div class="border-b border-gray-800 pb-4 mb-4">
-              <div class="text-sm text-gray-500 mb-1">Dari: <span class="text-gray-300 break-all">{formatSender(selectedEmail.from_address)}</span></div>
-              <h2 class="text-lg font-bold text-gray-100">{selectedEmail.subject || '(Tanpa subjek)'}</h2>
-              <div class="text-xs text-gray-500 mt-1">{fmtDate(selectedEmail.received_at, { weekday: 'long', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long', year: 'numeric' })}</div>
+              <h2 class="text-xl font-bold text-gray-100 mb-3 pr-8">{selectedEmail.subject || '(Tanpa subjek)'}</h2>
+              <div class="flex items-start gap-3">
+                <div class="w-11 h-11 rounded-full flex items-center justify-center text-lg font-bold text-white flex-shrink-0" style="background:{senderColor(selectedEmail.from_address)}">
+                  {senderInitial(selectedEmail.from_address)}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="font-semibold text-gray-100 text-[15px] leading-tight truncate">{formatSender(selectedEmail.from_address)}</div>
+                  <div class="text-xs text-gray-500 truncate">kepada {activeAlias?.email || 'saya'}</div>
+                  <div class="text-xs text-gray-500 mt-0.5">{fmtDate(selectedEmail.received_at, { weekday: 'long', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                </div>
+              </div>
             </div>
-            <div class="rounded-xl border border-gray-200 overflow-auto" style="background:#fff;overflow-wrap:break-word;word-break:break-word;">
-              {@html (() => { const { html, isHtml } = renderEmail(selectedEmail.body_html, selectedEmail.body_text); if (!html) return '<div style="padding:16px;color:#999;font-style:italic">(Kosong)</div>'; if (isHtml) return '<div style="padding:16px;max-width:100%;overflow-x:auto;font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#000;background:#fff">' + html + '</div>'; return '<div style="padding:16px;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#000;background:#fff;white-space:pre-wrap">' + html + '</div>'; })()}
+            <div class="rounded-xl border border-gray-200 overflow-hidden" style="background:#fff;">
+              {#if emailView?.kind === 'html' && emailView.html}
+                <div class="email-shadow-host" use:mountEmailShadow={emailView.html}></div>
+              {:else if emailView?.kind === 'text' && emailView.text}
+                <div class="email-text" style="padding:16px;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#000;background:#fff;white-space:pre-wrap;">{@html renderPlainText(emailView.text)}</div>
+              {:else}
+                <div style="padding:16px;color:#999;font-style:italic">(Kosong)</div>
+              {/if}
             </div>
           </div>
         {:else if emails.length === 0}
@@ -153,10 +235,10 @@
   </div>
 
   {#if showChange}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" on:click={() => showChange = false} on:keydown={() => {}}>
-      <div class="bg-gray-900 border border-gray-700 w-full max-w-sm p-5 rounded-2xl" on:click|stopPropagation on:keydown|stopPropagation>
+    <div role="presentation" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" on:click|self={() => showChange = false}>
+      <div role="dialog" aria-modal="true" aria-labelledby="change-dialog-title" class="bg-gray-900 border border-gray-700 w-full max-w-sm p-5 rounded-2xl">
         <div class="flex items-center justify-between mb-5">
-          <h3 class="text-lg font-bold text-gray-100">Change Your Address</h3>
+          <h3 id="change-dialog-title" class="text-lg font-bold text-gray-100">Change Your Address</h3>
           <button on:click={() => showChange = false} class="text-gray-400 hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
         </div>
         <div class="space-y-3">
@@ -172,18 +254,18 @@
   {/if}
 
   {#if showSend}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" on:click={() => showSend = false} on:keydown={() => {}}>
-      <div class="bg-gray-900 border border-gray-700 w-full max-w-lg p-6 rounded-2xl max-h-[90vh] overflow-y-auto" on:click|stopPropagation on:keydown|stopPropagation>
+    <div role="presentation" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" on:click|self={() => showSend = false}>
+      <div role="dialog" aria-modal="true" aria-labelledby="send-dialog-title" class="bg-gray-900 border border-gray-700 w-full max-w-lg p-6 rounded-2xl max-h-[90vh] overflow-y-auto">
         <div class="flex items-center justify-between mb-6">
-          <h3 class="text-xl font-bold text-gray-100">Kirim Email</h3>
+          <h3 id="send-dialog-title" class="text-xl font-bold text-gray-100">Kirim Email</h3>
           <button on:click={() => showSend = false} class="text-gray-400 hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
         </div>
         <form on:submit|preventDefault={handleSend} class="space-y-4">
-          <div><label class="block text-sm font-medium text-gray-400 mb-2">Pilih Pengirim:</label><select bind:value={sendFrom} class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm">{#each aliases as a}<option value={a.email}>{a.email}</option>{/each}</select></div>
-          <div><label class="block text-sm font-medium text-gray-400 mb-2">Nama Pengirim:</label><input type="text" bind:value={sendName} placeholder="Contoh: RouterSSH Support" class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm" /></div>
-          <div><label class="block text-sm font-medium text-gray-400 mb-2">Email Tujuan:</label><input type="email" bind:value={sendTo} placeholder="tujuan@gmail.com" required class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm" /></div>
-          <div><label class="block text-sm font-medium text-gray-400 mb-2">Subjek:</label><input type="text" bind:value={sendSubject} placeholder="Subjek email" class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm" /></div>
-          <div><label class="block text-sm font-medium text-gray-400 mb-2">Isi Pesan:</label><textarea bind:value={sendBody} placeholder="Tulis pesan..." required class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm min-h-[120px] resize-y"></textarea></div>
+          <div><label for="send-from" class="block text-sm font-medium text-gray-400 mb-2">Pilih Pengirim:</label><select id="send-from" bind:value={sendFrom} class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm">{#each aliases as a}<option value={a.email}>{a.email}</option>{/each}</select></div>
+          <div><label for="send-name" class="block text-sm font-medium text-gray-400 mb-2">Nama Pengirim:</label><input id="send-name" type="text" bind:value={sendName} placeholder="Contoh: RouterSSH Support" class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm" /></div>
+          <div><label for="send-to" class="block text-sm font-medium text-gray-400 mb-2">Email Tujuan:</label><input id="send-to" type="email" bind:value={sendTo} placeholder="tujuan@gmail.com" required class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm" /></div>
+          <div><label for="send-subject" class="block text-sm font-medium text-gray-400 mb-2">Subjek:</label><input id="send-subject" type="text" bind:value={sendSubject} placeholder="Subjek email" class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm" /></div>
+          <div><label for="send-body" class="block text-sm font-medium text-gray-400 mb-2">Isi Pesan:</label><textarea id="send-body" bind:value={sendBody} placeholder="Tulis pesan..." required class="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-gray-200 text-sm min-h-[120px] resize-y"></textarea></div>
           {#if sendError}<div class="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl p-3">{sendError}</div>{/if}
           <button type="submit" disabled={sending} class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-medium rounded-xl transition-all disabled:opacity-50"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>{sending ? 'Mengirim...' : 'Kirim Email'}</button>
         </form>

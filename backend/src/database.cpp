@@ -53,6 +53,7 @@ void Database::init_schema() {
 }
 
 Alias Database::create_alias(const std::string& email, const std::string& expires_at) {
+    std::lock_guard<std::mutex> lock(mutex_);
     Alias a;
     const char* sql = "INSERT INTO aliases (id, email, expires_at) VALUES (lower(hex(randomblob(16))), ?, ?) RETURNING id, email, created_at, expires_at";
     sqlite3_stmt* stmt;
@@ -71,6 +72,7 @@ Alias Database::create_alias(const std::string& email, const std::string& expire
 }
 
 std::optional<Alias> Database::get_alias(const std::string& email) {
+    std::lock_guard<std::mutex> lock(mutex_);
     const char* sql = R"(
         SELECT a.id, a.email, a.created_at, a.expires_at, COUNT(e.id)
         FROM aliases a LEFT JOIN emails e ON a.id = e.alias_id
@@ -94,6 +96,7 @@ std::optional<Alias> Database::get_alias(const std::string& email) {
 }
 
 std::vector<Alias> Database::get_active_aliases() {
+    std::lock_guard<std::mutex> lock(mutex_);
     std::vector<Alias> aliases;
     const char* sql = R"(
         SELECT a.id, a.email, a.created_at, a.expires_at, COUNT(e.id)
@@ -117,17 +120,43 @@ std::vector<Alias> Database::get_active_aliases() {
 }
 
 bool Database::delete_alias(const std::string& email) {
-    char* err = nullptr;
-    std::string sql = "DELETE FROM emails WHERE alias_id IN (SELECT id FROM aliases WHERE email='" + email + "')";
-    sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, &err);
-    if (err) sqlite3_free(err);
-    sql = "DELETE FROM aliases WHERE email='" + email + "'";
-    sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, &err);
-    if (err) sqlite3_free(err);
-    return sqlite3_changes(db_) > 0;
+    std::lock_guard<std::mutex> lock(mutex_);
+    sqlite3_exec(db_, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr);
+    sqlite3_stmt* stmt = nullptr;
+    const char* delete_emails = "DELETE FROM emails WHERE alias_id IN (SELECT id FROM aliases WHERE email = ?)";
+    if (sqlite3_prepare_v2(db_, delete_emails, -1, &stmt, nullptr) != SQLITE_OK) {
+        sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
+    bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    if (!ok || sqlite3_prepare_v2(db_, "DELETE FROM aliases WHERE email = ?", -1, &stmt, nullptr) != SQLITE_OK) {
+        sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
+    ok = sqlite3_step(stmt) == SQLITE_DONE;
+    int deleted = sqlite3_changes(db_);
+    sqlite3_finalize(stmt);
+    sqlite3_exec(db_, ok ? "COMMIT" : "ROLLBACK", nullptr, nullptr, nullptr);
+    return ok && deleted > 0;
+}
+
+int Database::clear_emails(const std::string& email) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = "DELETE FROM emails WHERE alias_id IN (SELECT id FROM aliases WHERE email = ?)";
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) return -1;
+    sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
+    bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+    int deleted = sqlite3_changes(db_);
+    sqlite3_finalize(stmt);
+    return ok ? deleted : -1;
 }
 
 int Database::cleanup_expired() {
+    std::lock_guard<std::mutex> lock(mutex_);
     char* err = nullptr;
     sqlite3_exec(db_, "DELETE FROM emails WHERE alias_id NOT IN (SELECT id FROM aliases)", nullptr, nullptr, &err);
     if (err) sqlite3_free(err);
@@ -139,6 +168,7 @@ int Database::cleanup_expired() {
 int Database::store_email(const std::string& alias_id, const std::string& from,
                           const std::string& to, const std::string& subject,
                           const std::string& body_text, const std::string& body_html) {
+    std::lock_guard<std::mutex> lock(mutex_);
     const char* sql = "INSERT INTO emails (alias_id, from_address, to_address, subject, body_text, body_html) VALUES (?, ?, ?, ?, ?, ?)";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
@@ -154,6 +184,7 @@ int Database::store_email(const std::string& alias_id, const std::string& from,
 }
 
 std::vector<Email> Database::get_emails(const std::string& alias_id, int after_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
     std::vector<Email> emails;
     const char* sql = "SELECT id, alias_id, from_address, to_address, subject, body_text, body_html, received_at, is_read FROM emails WHERE alias_id = ? AND id > ? ORDER BY received_at DESC";
     sqlite3_stmt* stmt;
@@ -178,6 +209,7 @@ std::vector<Email> Database::get_emails(const std::string& alias_id, int after_i
 }
 
 std::optional<Email> Database::get_email(int id) {
+    std::lock_guard<std::mutex> lock(mutex_);
     const char* sql = "SELECT id, alias_id, from_address, to_address, subject, body_text, body_html, received_at, is_read FROM emails WHERE id = ?";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
@@ -201,6 +233,7 @@ std::optional<Email> Database::get_email(int id) {
 }
 
 bool Database::mark_read(int id) {
+    std::lock_guard<std::mutex> lock(mutex_);
     const char* sql = "UPDATE emails SET is_read = 1 WHERE id = ?";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
@@ -211,6 +244,7 @@ bool Database::mark_read(int id) {
 }
 
 bool Database::mark_alias_read(const std::string& alias_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
     const char* sql = "UPDATE emails SET is_read = 1 WHERE alias_id = ?";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);

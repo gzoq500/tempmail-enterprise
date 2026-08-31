@@ -1,80 +1,106 @@
 #!/usr/bin/env python3
-"""TempMail Email Handler v5 - Bulletproof for ALL email formats."""
-import sys
+"""Reliable Postfix pipe handler for TempMail."""
+
+from __future__ import annotations
+
 import json
+import os
 import re
+import sys
+import time
+import urllib.error
 import urllib.request
 
-API_URL = "http://localhost:3001/api/incoming"
+API_URL = os.environ.get("TEMPMAIL_API_URL", "http://127.0.0.1:3001/api/incoming")
+ATTEMPTS = 3
+
 
 def extract_header(raw: str, name: str) -> str:
-    """Extract header value, handling multi-line folded headers (RFC 2822)."""
-    pattern = rf'^{re.escape(name)}:\s*(.*?)(?:\n(?![ \t])|\Z)'
+    """Extract a header value, including RFC 2822 folded continuation lines."""
+    pattern = rf"^{re.escape(name)}:\s*(.*?)(?:\n(?![ \t])|\Z)"
     match = re.search(pattern, raw, re.MULTILINE | re.IGNORECASE)
     if not match:
         return ""
-    value = match.group(1).replace('\r\n', '\n').replace('\r', '\n')
-    value = re.sub(r'\n[ \t]+', ' ', value).strip()
-    return value
+    value = match.group(1).replace("\r\n", "\n").replace("\r", "\n")
+    return re.sub(r"\n[ \t]+", " ", value).strip()
+
 
 def extract_email_address(header: str) -> str:
-    """Extract email address from From/To header."""
-    m = re.search(r'<([^>]+)>', header)
-    if m:
-        return m.group(1).strip()
-    m = re.search(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', header)
-    if m:
-        return m.group(0).lower()
-    return header.strip()
+    match = re.search(r"<([^>]+)>", header)
+    if match:
+        return match.group(1).strip().lower()
+    match = re.search(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", header)
+    return match.group(0).lower() if match else header.strip().lower()
+
 
 def get_body(raw: str) -> str:
-    """Get body after headers. Handle both \\n\\n and \\r\\n\\r\\n."""
-    # Find the blank line that separates headers from body
-    # Must be at the START of a line (not inside a header value)
-    lines = raw.split('\n')
-    header_end = -1
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped == '' and i > 0:
-            header_end = i
-            break
-    if header_end == -1:
-        return ""
-    return '\n'.join(lines[header_end + 1:])
+    lines = raw.split("\n")
+    for index, line in enumerate(lines):
+        if index > 0 and not line.strip():
+            return "\n".join(lines[index + 1 :])
+    return ""
 
-def main():
+
+def deliver(payload: bytes) -> None:
+    last_error: Exception | None = None
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            request = urllib.request.Request(
+                API_URL,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"backend returned HTTP {response.status}")
+                return
+        except Exception as exc:
+            last_error = exc
+            if attempt < ATTEMPTS:
+                time.sleep(0.25 * attempt)
+    raise RuntimeError(f"TempMail backend delivery failed after {ATTEMPTS} attempts: {last_error}")
+
+
+def main() -> int:
     raw = sys.stdin.read()
     if not raw.strip():
-        return
+        print("TempMail handler received an empty message", file=sys.stderr)
+        return 75
 
-    from_header = extract_header(raw, "From")
-    to_header = extract_header(raw, "To")
-    subject = extract_header(raw, "Subject")
-    to_email = extract_email_address(to_header)
     body = get_body(raw)
-
     if not body.strip():
-        return
+        print("TempMail handler received a message without a body", file=sys.stderr)
+        return 75
 
-    payload = json.dumps({
-        "from": from_header,
-        "to": to_email,
-        "subject": subject,
-        "body": body,
-        "html": ""
-    }, ensure_ascii=False)
+    # Postfix passes envelope sender and recipient as argv[1]/argv[2].
+    # Envelope recipient is authoritative for forwarded, Bcc, and rewritten mail;
+    # the visible To header can contain a different address.
+    envelope_recipient = extract_email_address(sys.argv[2]) if len(sys.argv) > 2 else ""
+    header_recipient = extract_email_address(extract_header(raw, "To"))
+    recipient = envelope_recipient or header_recipient
+    if not recipient:
+        print("TempMail handler could not determine the envelope recipient", file=sys.stderr)
+        return 75
+
+    payload = json.dumps(
+        {
+            "from": extract_header(raw, "From"),
+            "to": recipient,
+            "subject": extract_header(raw, "Subject"),
+            "body": body,
+            "html": "",
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
 
     try:
-        req = urllib.request.Request(
-            API_URL,
-            data=payload.encode('utf-8'),
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            pass
-    except Exception:
-        pass
+        deliver(payload)
+        return 0
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        return 75  # EX_TEMPFAIL: Postfix queues and retries the message.
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -10,11 +10,94 @@
 #include <iostream>
 #include <thread>
 #include <vector>
+#include <regex>
+#include <cerrno>
+#include <cctype>
+#include <climits>
+#include <cstring>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 using json = nlohmann::json;
 
+namespace {
+bool parse_bounded_int(const httplib::Request& req, const char* name, int default_value,
+                       int minimum, int maximum, int& output) {
+    output = default_value;
+    if (!req.has_param(name)) return true;
+    try {
+        const std::string value = req.get_param_value(name);
+        size_t consumed = 0;
+        long long parsed = std::stoll(value, &consumed, 10);
+        if (consumed != value.size() || parsed < minimum || parsed > maximum) return false;
+        output = static_cast<int>(parsed);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool is_valid_email(const std::string& email) {
+    if (email.empty() || email.size() > 254 || email.find('\r') != std::string::npos ||
+        email.find('\n') != std::string::npos || email.find(' ') != std::string::npos) return false;
+    const size_t at = email.find('@');
+    if (at == 0 || at == std::string::npos || at != email.rfind('@') || at + 3 > email.size()) return false;
+    if (email.find('.', at + 2) == std::string::npos) return false;
+    const auto valid_local = [](unsigned char c) {
+        return std::isalnum(c) || c == '.' || c == '_' || c == '%' || c == '+' || c == '-';
+    };
+    const auto valid_domain = [](unsigned char c) {
+        return std::isalnum(c) || c == '.' || c == '-';
+    };
+    return std::all_of(email.begin(), email.begin() + static_cast<std::ptrdiff_t>(at), valid_local) &&
+           std::all_of(email.begin() + static_cast<std::ptrdiff_t>(at + 1), email.end(), valid_domain);
+}
+
+bool write_all(int fd, const std::string& data) {
+    size_t written = 0;
+    while (written < data.size()) {
+        ssize_t result = write(fd, data.data() + written, data.size() - written);
+        if (result < 0 && errno == EINTR) continue;
+        if (result <= 0) return false;
+        written += static_cast<size_t>(result);
+    }
+    return true;
+}
+
+int send_via_sendmail(const std::string& from, const std::string& to, const std::string& message) {
+    int input_pipe[2];
+    if (pipe(input_pipe) != 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(input_pipe[0]); close(input_pipe[1]);
+        return -1;
+    }
+    if (pid == 0) {
+        dup2(input_pipe[0], STDIN_FILENO);
+        close(input_pipe[0]); close(input_pipe[1]);
+        const char* argv[] = {"sendmail", "-f", from.c_str(), "--", to.c_str(), nullptr};
+        execv("/usr/sbin/sendmail", const_cast<char* const*>(argv));
+        _exit(127);
+    }
+    close(input_pipe[0]);
+    bool wrote = write_all(input_pipe[1], message);
+    close(input_pipe[1]);
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+    return wrote && WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
+}
+}
+
 TempMailServer::TempMailServer(Database& db, const std::string& domain, int port)
     : db_(db), domain_(domain), port_(port) {}
+
+void TempMailServer::stop() {
+    stopping_.store(true);
+    email_event_.notify_all();
+    shutdown_event_.notify_all();
+    if (auto* server = server_.load()) server->stop();
+}
 
 std::string TempMailServer::generate_alias() {
     // Indonesian name parts
@@ -47,6 +130,19 @@ std::string TempMailServer::generate_alias() {
 
 void TempMailServer::start() {
     httplib::Server svr;
+    stopping_.store(false);
+    server_.store(&svr);
+    svr.set_payload_max_length(10 * 1024 * 1024);
+    svr.set_read_timeout(15, 0);
+    svr.set_write_timeout(15, 0);
+    svr.set_keep_alive_timeout(10);
+    svr.set_keep_alive_max_count(100);
+    svr.set_exception_handler([](const httplib::Request&, httplib::Response& res, std::exception_ptr ep) {
+        try { if (ep) std::rethrow_exception(ep); }
+        catch (const std::exception& e) { std::cerr << "[REQUEST ERROR] " << e.what() << std::endl; }
+        res.status = 400;
+        res.set_content(R"({"error":"Invalid request"})", "application/json");
+    });
 
     // CORS
     svr.set_pre_routing_handler([](const httplib::Request& req, httplib::Response& res) -> httplib::Server::HandlerResponse {
@@ -95,8 +191,15 @@ void TempMailServer::start() {
 
         // Custom alias
         if (!custom_email.empty()) {
-            if (custom_email.find("@") == std::string::npos || custom_email.find("@") == 0) {
+            if (custom_email.find("@") == std::string::npos) {
                 custom_email = custom_email + "@" + domain_;
+            }
+            const std::string required_suffix = "@" + domain_;
+            if (!is_valid_email(custom_email) || custom_email.size() <= required_suffix.size() ||
+                custom_email.compare(custom_email.size() - required_suffix.size(), required_suffix.size(), required_suffix) != 0) {
+                res.status = 400;
+                res.set_content(R"({"error":"Alias must use the configured domain"})", "application/json");
+                return;
             }
             if (db_.get_alias(custom_email).has_value()) {
                 res.status = 409;
@@ -145,8 +248,12 @@ void TempMailServer::start() {
             res.set_content(R"({"error":"Alias not found"})", "application/json");
             return;
         }
-        auto after = 0;
-        if (req.has_param("after")) after = std::stoi(req.get_param_value("after"));
+        int after = 0;
+        if (!parse_bounded_int(req, "after", 0, 0, INT_MAX, after)) {
+            res.status = 400;
+            res.set_content(R"({"error":"Invalid 'after' parameter"})", "application/json");
+            return;
+        }
 
         auto emails = db_.get_emails(alias->id, after);
         std::cout << "[EMAILS] " << email << " -> " << emails.size() << " emails found" << std::endl;
@@ -191,6 +298,20 @@ void TempMailServer::start() {
         }
     });
 
+    // DELETE /api/emails/:email - Clear all emails for alias (keep alias)
+    svr.Delete(R"(/api/emails/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
+        std::string email = req.matches[1];
+        auto alias = db_.get_alias(email);
+        if (!alias) {
+            res.status = 404;
+            res.set_content(R"({"error":"Alias not found"})", "application/json");
+            return;
+        }
+        int deleted = db_.clear_emails(email);
+        json j = {{"success", true}, {"deleted", deleted}};
+        res.set_content(j.dump(), "application/json");
+    });
+
     // GET /api/check/:email - Poll for new emails
     svr.Get(R"(/api/check/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
         std::string email = req.matches[1];
@@ -201,7 +322,11 @@ void TempMailServer::start() {
             return;
         }
         int after = 0;
-        if (req.has_param("after")) after = std::stoi(req.get_param_value("after"));
+        if (!parse_bounded_int(req, "after", 0, 0, INT_MAX, after)) {
+            res.status = 400;
+            res.set_content(R"({"error":"Invalid 'after' parameter"})", "application/json");
+            return;
+        }
 
         auto emails = db_.get_emails(alias->id, after);
         json arr = json::array();
@@ -310,10 +435,43 @@ void TempMailServer::start() {
             };
             sanitize_utf8(clean_html);
             sanitize_utf8(clean_body);
-            
-int id = db_.store_email(alias->id, from, to, subject, clean_body, clean_html);
-            std::cout << "[INCOMING] " << from << " -> " << to << " (" << subject << ") id=" << id << std::endl;
 
+            // ── Strip trailing MIME boundary delimiters ──
+            // Boundary-based extraction can leave the closing delimiter
+            // ("--boundary--") glued to the last MIME part. That delimiter is
+            // transport framing, never email content, so drop every trailing
+            // line that looks like a MIME boundary marker.
+            auto strip_mime_boundaries = [](std::string& s) {
+                while (true) {
+                    size_t line_begin = s.find_last_of('\n');
+                    line_begin = (line_begin == std::string::npos) ? 0 : line_begin + 1;
+                    std::string trimmed = s.substr(line_begin);
+                    while (!trimmed.empty() && (trimmed.back() == '\r' || trimmed.back() == '\n' ||
+                                                trimmed.back() == ' ' || trimmed.back() == '\t')) {
+                        trimmed.pop_back();
+                    }
+                    // MIME boundary lines start with "--" and carry a boundary token.
+                    const bool looks_like_boundary = trimmed.rfind("--", 0) == 0 && trimmed.size() >= 4;
+                    if (!looks_like_boundary) break;
+                    s.resize(line_begin == 0 ? 0 : line_begin - 1);
+                    while (!s.empty() && (s.back() == '\r' || s.back() == '\n')) s.pop_back();
+                }
+            };
+            strip_mime_boundaries(clean_html);
+            strip_mime_boundaries(clean_body);
+
+            int id = db_.store_email(alias->id, from, to, subject, clean_body, clean_html);
+            if (id < 0) {
+                res.status = 500;
+                res.set_content(R"({"error":"Failed to store email"})", "application/json");
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> lock(event_mutex_);
+                ++email_event_version_;
+            }
+            email_event_.notify_all();
+            std::cout << "[INCOMING] " << from << " -> " << to << " (" << subject << ") id=" << id << std::endl;
 
             res.set_content(R"({"success":true})", "application/json");
         } catch (const std::exception& e) {
@@ -337,6 +495,18 @@ int id = db_.store_email(alias->id, from, to, subject, clean_body, clean_html);
                 res.set_content(R"({"error":"Missing required fields: from, to, body"})", "application/json");
                 return;
             }
+            if (!is_valid_email(from_email) || !is_valid_email(to) ||
+                from_name.find('\r') != std::string::npos || from_name.find('\n') != std::string::npos ||
+                subject.find('\r') != std::string::npos || subject.find('\n') != std::string::npos) {
+                res.status = 400;
+                res.set_content(R"({"error":"Invalid email fields"})", "application/json");
+                return;
+            }
+            if (!db_.get_alias(from_email).has_value()) {
+                res.status = 403;
+                res.set_content(R"({"error":"Sender must be an active alias"})", "application/json");
+                return;
+            }
 
             // Build plain text email only (no HTML to avoid spam filters)
             std::string from_header = from_name.empty() ? from_email : from_name + " <" + from_email + ">";
@@ -350,23 +520,8 @@ int id = db_.store_email(alias->id, from, to, subject, clean_body, clean_html);
                                   + "\r\n"
                                   + body;
 
-            // Write to temp file and send via sendmail
-            std::string tmpfile = "/tmp/tempmail_send_" + std::to_string(time(nullptr)) + ".eml";
-            FILE* f = fopen(tmpfile.c_str(), "w");
-            if (!f) {
-                res.status = 500;
-                res.set_content(R"({"error":"Failed to create temp file"})", "application/json");
-                return;
-            }
-            fprintf(f, "%s", email_msg.c_str());
-            fclose(f);
-
-            // Send via sendmail
-            std::string cmd = "/usr/sbin/sendmail -f '" + from_email + "' '" + to + "' < " + tmpfile;
-            int ret = system(cmd.c_str());
-
-            // Cleanup
-            remove(tmpfile.c_str());
+            // Send directly to sendmail stdin without invoking a shell or temp file.
+            int ret = send_via_sendmail(from_email, to, email_msg);
 
             if (ret == 0) {
                 std::cout << "[SEND] " << from_email << " -> " << to << " (" << subject << ")" << std::endl;
@@ -382,26 +537,126 @@ int id = db_.store_email(alias->id, from, to, subject, clean_body, clean_html);
         }
     });
 
+    // ── AUTOMATION API ──
+
+    // GET /api/wait/{email}?after=0&timeout=30 - Wait for new email (long polling)
+    svr.Get(R"(/api/wait/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
+        std::string email = req.matches[1];
+        auto alias = db_.get_alias(email);
+        if (!alias) {
+            res.status = 404;
+            res.set_content(R"({"error":"Alias not found"})", "application/json");
+            return;
+        }
+        int after = 0;
+        int timeout = 30;
+        if (!parse_bounded_int(req, "after", 0, 0, INT_MAX, after) ||
+            !parse_bounded_int(req, "timeout", 30, 1, 120, timeout)) {
+            res.status = 400;
+            res.set_content(R"({"error":"Invalid wait parameters"})", "application/json");
+            return;
+        }
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout);
+        std::unique_lock<std::mutex> event_lock(event_mutex_);
+        std::uint64_t observed_version = email_event_version_;
+        while (true) {
+            event_lock.unlock();
+            auto emails = db_.get_emails(alias->id, after);
+            if (!emails.empty()) {
+                const auto& e = emails[0];
+                json j = {
+                    {"id", e.id}, {"from_address", e.from_address},
+                    {"subject", e.subject}, {"body_text", e.body_text},
+                    {"body_html", e.body_html}, {"received_at", e.received_at},
+                    {"is_read", e.is_read}
+                };
+                res.set_content(j.dump(), "application/json");
+                return;
+            }
+            event_lock.lock();
+            if (std::chrono::steady_clock::now() >= deadline || stopping_.load()) {
+                res.status = 408;
+                res.set_content(R"({"error":"Timeout"})", "application/json");
+                return;
+            }
+            email_event_.wait_until(event_lock, deadline, [&]() {
+                return stopping_.load() || email_event_version_ != observed_version;
+            });
+            observed_version = email_event_version_;
+        }
+    });
+
+    // GET /api/extract/{email_id} - Extract token/code/link from email
+    svr.Get(R"(/api/extract/(\d+))", [this](const httplib::Request& req, httplib::Response& res) {
+        int email_id = std::stoi(req.matches[1]);
+        auto email = db_.get_email(email_id);
+        if (!email) {
+            res.status = 404;
+            res.set_content(R"({"error":"Email not found"})", "application/json");
+            return;
+        }
+
+        std::string content = email->body_text.empty() ? email->body_html : email->body_text;
+        json result = {{"id", email->id}, {"subject", email->subject}, {"from", email->from_address}};
+
+        // Extract verification codes (4-8 digit numbers after keywords)
+        std::regex code_re("(?:code|otp|pin|verification|verify|confirm)[:\\s]*([0-9]{4,8})", std::regex::icase);
+        std::smatch m;
+        if (std::regex_search(content, m, code_re)) result["code"] = m[1].str();
+
+        // Extract standalone 6-digit codes
+        if (!result.contains("code")) {
+            std::regex digit_re("\\b([0-9]{6})\\b");
+            if (std::regex_search(content, m, digit_re)) result["code"] = m[1].str();
+        }
+
+        // Extract magic links / verification URLs
+        std::regex link_re("(https?://[^\\s<>\"']+(?:verify|confirm|activate|validate|auth|login|token|magic)[^\\s<>\"']*)", std::regex::icase);
+        if (std::regex_search(content, m, link_re)) result["link"] = m[1].str();
+
+        // Extract any long URL if no magic link found
+        if (!result.contains("link")) {
+            std::regex url_re("(https?://[^\\s<>\"']{20,})");
+            if (std::regex_search(content, m, url_re)) result["link"] = m[1].str();
+        }
+
+        // Extract token strings
+        std::regex token_re("(?:token|key|hash|secret)[:\\s]*([a-zA-Z0-9_-]{20,})", std::regex::icase);
+        if (std::regex_search(content, m, token_re)) result["token"] = m[1].str();
+
+        res.set_content(result.dump(), "application/json");
+    });
+
     // Health check
     svr.Get("/api/health", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(R"({"status":"ok","server":"tempmail-cpp"})", "application/json");
     });
 
-    // Cleanup thread (every hour)
-    std::thread([this]() {
-        while (true) {
-            std::this_thread::sleep_for(std::chrono::hours(1));
+    // Interruptible cleanup thread (one wakeup per hour, no detached lifetime).
+    cleanup_thread_ = std::thread([this]() {
+        std::unique_lock<std::mutex> lock(shutdown_mutex_);
+        while (!stopping_.load()) {
+            if (shutdown_event_.wait_for(lock, std::chrono::hours(1), [&]() { return stopping_.load(); })) break;
+            lock.unlock();
             int cleaned = db_.cleanup_expired();
             if (cleaned > 0) {
                 std::cout << "[CLEANUP] Removed " << cleaned << " expired aliases" << std::endl;
             }
+            lock.lock();
         }
-    }).detach();
+    });
 
     std::cout << "TempMail C++ server starting on port " << port_ << std::endl;
     std::cout << "Domain: " << domain_ << std::endl;
 
-    if (!svr.listen("0.0.0.0", port_)) {
+    bool listened = svr.listen("127.0.0.1", port_);
+    stopping_.store(true);
+    shutdown_event_.notify_all();
+    email_event_.notify_all();
+    if (cleanup_thread_.joinable()) cleanup_thread_.join();
+    server_.store(nullptr);
+    if (!listened) {
         throw std::runtime_error("Failed to start server on port " + std::to_string(port_));
     }
 }
