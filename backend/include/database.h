@@ -30,10 +30,15 @@ public:
     Database(const std::string& db_path);
     ~Database();
 
-    Alias create_alias(const std::string& email, const std::string& expires_at);
+    Alias create_alias(const std::string& email, const std::string& expires_at,
+                       const std::string& api_key = "");
     std::optional<Alias> get_alias(const std::string& email);
-    std::vector<Alias> get_active_aliases();
+    std::optional<Alias> get_alias_by_api_key(const std::string& api_key);
+    bool api_key_owns_alias(const std::string& api_key, const std::string& email);
+    bool api_key_owns_email(const std::string& api_key, int email_id);
+    std::vector<Alias> get_active_aliases(const std::string& api_key = "");
     bool delete_alias(const std::string& email);
+    bool delete_alias_by_api_key(const std::string& api_key);
     int clear_emails(const std::string& email);  // Delete all emails for alias
     int cleanup_expired();
 

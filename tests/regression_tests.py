@@ -24,9 +24,12 @@ DATABASE_SOURCE = Path(os.environ.get("TEMPMAIL_DATABASE_SOURCE", str(REPO_ROOT 
 HANDLER_PATH = Path(os.environ.get("TEMPMAIL_HANDLER_PATH", str(REPO_ROOT / "scripts/tempmail-handler")))
 
 
-def request(path: str, *, method: str = "GET", payload: dict | None = None, timeout: float = 5) -> tuple[int, str]:
+def request(path: str, *, method: str = "GET", payload: dict | None = None,
+            api_key: str | None = None, timeout: float = 5) -> tuple[int, str]:
     data = json.dumps(payload).encode() if payload is not None else None
     headers = {"Content-Type": "application/json"} if payload is not None else {}
+    if api_key:
+        headers["X-API-Key"] = api_key
     req = urllib.request.Request(BASE_URL + path, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
@@ -38,7 +41,9 @@ def request(path: str, *, method: str = "GET", payload: dict | None = None, time
 def test_invalid_numeric_parameters_return_400() -> None:
     status, body = request("/api/alias", method="POST", payload={"duration": "forever"})
     assert status == 200, (status, body)
-    email = json.loads(body)["email"]
+    data = json.loads(body)
+    email = data["email"]
+    api_key = data["api_key"]
     encoded = urllib.parse.quote(email, safe="")
     for path in (
         f"/api/check/{encoded}?after=invalid",
@@ -47,13 +52,11 @@ def test_invalid_numeric_parameters_return_400() -> None:
         f"/api/wait/{encoded}?after=0&timeout=invalid",
         f"/api/wait/{encoded}?after=0&timeout=-1",
     ):
-        status, _ = request(path)
+        status, _ = request(path, api_key=api_key)
         assert status == 400, (path, status)
 
 
 def test_custom_alias_rejects_external_domain() -> None:
-    # Use an unmistakably external reserved domain. The staging server itself
-    # may legitimately be configured as example.com.
     status, _ = request("/api/alias", method="POST", payload={"email": "user@invalid.example", "duration": "1h"})
     assert status == 400, status
 

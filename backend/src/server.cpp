@@ -54,6 +54,31 @@ bool is_valid_email(const std::string& email) {
            std::all_of(email.begin() + static_cast<std::ptrdiff_t>(at + 1), email.end(), valid_domain);
 }
 
+std::string generate_api_key() {
+    std::random_device entropy;
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string key = "temp-";
+    key.reserve(69);
+    for (int i = 0; i < 32; ++i) {
+        const unsigned int byte = entropy() & 0xffU;
+        key.push_back(hex[(byte >> 4) & 0x0fU]);
+        key.push_back(hex[byte & 0x0fU]);
+    }
+    return key;
+}
+
+std::string get_api_key(const httplib::Request& req) {
+    if (req.has_header("X-API-Key")) return req.get_header_value("X-API-Key");
+    if (req.has_param("key")) return req.get_param_value("key");
+    return "";
+}
+
+void auth_error(httplib::Response& res) {
+    res.status = 401;
+    res.set_header("WWW-Authenticate", "ApiKey");
+    res.set_content(R"({"error":"Valid API key required"})", "application/json");
+}
+
 bool write_all(int fd, const std::string& data) {
     size_t written = 0;
     while (written < data.size()) {
@@ -148,7 +173,7 @@ void TempMailServer::start() {
     svr.set_pre_routing_handler([](const httplib::Request& req, httplib::Response& res) -> httplib::Server::HandlerResponse {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key");
         if (req.method == "OPTIONS") {
             res.status = 204;
             return httplib::Server::HandlerResponse::Handled;
@@ -206,8 +231,10 @@ void TempMailServer::start() {
                 res.set_content(R"({"error":"Alias already exists"})", "application/json");
                 return;
             }
-            auto a = db_.create_alias(custom_email, expires_at);
-            json j = {{"id", a.id}, {"email", a.email}, {"expires_at", a.expires_at}};
+            const std::string api_key = generate_api_key();
+            auto a = db_.create_alias(custom_email, expires_at, api_key);
+            json j = {{"id", a.id}, {"email", a.email}, {"expires_at", a.expires_at}, {"api_key", api_key}};
+            res.set_header("Cache-Control", "no-store");
             res.set_content(j.dump(), "application/json");
             return;
         }
@@ -217,8 +244,11 @@ void TempMailServer::start() {
             std::string alias = generate_alias();
             std::string email = alias + "@" + domain_;
             if (db_.get_alias(email).has_value()) continue;
-            auto a = db_.create_alias(email, expires_at);
-            json j = {{"id", a.id}, {"email", a.email}, {"expires_at", a.expires_at}};
+            const std::string api_key = generate_api_key();
+            auto a = db_.create_alias(email, expires_at, api_key);
+            if (a.id.empty()) continue;
+            json j = {{"id", a.id}, {"email", a.email}, {"expires_at", a.expires_at}, {"api_key", api_key}};
+            res.set_header("Cache-Control", "no-store");
             res.set_content(j.dump(), "application/json");
             return;
         }
@@ -226,24 +256,48 @@ void TempMailServer::start() {
         res.set_content(R"({"error":"Failed to generate alias"})", "application/json");
     });
 
-    // GET /api/aliases - List active aliases
-    svr.Get("/api/aliases", [this](const httplib::Request&, httplib::Response& res) {
-        auto aliases = db_.get_active_aliases();
-        json arr = json::array();
-        for (const auto& a : aliases) {
-            arr.push_back({{"id", a.id}, {"email", a.email},
-                          {"created_at", a.created_at}, {"expires_at", a.expires_at},
-                          {"email_count", a.email_count}});
-        }
-        json j = {{"aliases", arr}};
-        res.set_content(j.dump(), "application/json");
+    // GET /api/aliases - Return the single alias owned by this API key.
+    svr.Get("/api/aliases", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string api_key = get_api_key(req);
+        auto alias = db_.get_alias_by_api_key(api_key);
+        if (!alias) { auth_error(res); return; }
+        json arr = json::array({{{"id", alias->id}, {"email", alias->email},
+                                 {"created_at", alias->created_at}, {"expires_at", alias->expires_at},
+                                 {"email_count", alias->email_count}}});
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(json({{"aliases", arr}}).dump(), "application/json");
     });
 
-    // GET /api/emails/:email - Get emails for alias
+    // GET /api/messages - Automation inbox resolved only from API key.
+    svr.Get("/api/messages", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string api_key = get_api_key(req);
+        auto alias = db_.get_alias_by_api_key(api_key);
+        if (!alias) { auth_error(res); return; }
+        int after = 0;
+        if (!parse_bounded_int(req, "after", 0, 0, INT_MAX, after)) {
+            res.status = 400;
+            res.set_content(R"({"error":"Invalid 'after' parameter"})", "application/json");
+            return;
+        }
+        auto emails = db_.get_emails(alias->id, after);
+        db_.mark_alias_read(alias->id);
+        json arr = json::array();
+        for (const auto& e : emails) {
+            arr.push_back({{"id", e.id}, {"from_address", e.from_address},
+                           {"subject", e.subject}, {"body_text", e.body_text},
+                           {"body_html", e.body_html}, {"received_at", e.received_at},
+                           {"is_read", e.is_read}});
+        }
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(json({{"email", alias->email}, {"emails", arr}}).dump(), "application/json");
+    });
+
+    // GET /api/emails/:email - Browser-compatible inbox, scoped by API key.
     svr.Get(R"(/api/emails/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
         std::string email = req.matches[1];
-        auto alias = db_.get_alias(email);
-        if (!alias) {
+        const std::string api_key = get_api_key(req);
+        auto alias = db_.get_alias_by_api_key(api_key);
+        if (!alias || alias->email != email) {
             res.status = 404;
             res.set_content(R"({"error":"Alias not found"})", "application/json");
             return;
@@ -270,9 +324,15 @@ void TempMailServer::start() {
         res.set_content(j.dump(), "application/json");
     });
 
-    // GET /api/email/:id - Get specific email
+    // GET /api/email/:id - Get a specific key-owned email.
     svr.Get(R"(/api/email/(\d+))", [this](const httplib::Request& req, httplib::Response& res) {
         int id = std::stoi(req.matches[1]);
+        const std::string api_key = get_api_key(req);
+        if (!db_.api_key_owns_email(api_key, id)) {
+            res.status = 404;
+            res.set_content(R"({"error":"Email not found"})", "application/json");
+            return;
+        }
         auto email = db_.get_email(id);
         if (!email) {
             res.status = 404;
@@ -287,9 +347,27 @@ void TempMailServer::start() {
         res.set_content(j.dump(), "application/json");
     });
 
-    // DELETE /api/alias/:email - Delete alias
+    // DELETE /api/alias - Delete the alias resolved from its API key.
+    svr.Delete("/api/alias", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string api_key = get_api_key(req);
+        if (!db_.get_alias_by_api_key(api_key)) { auth_error(res); return; }
+        if (db_.delete_alias_by_api_key(api_key)) {
+            res.set_content(R"({"success":true})", "application/json");
+        } else {
+            res.status = 500;
+            res.set_content(R"({"error":"Failed to delete alias"})", "application/json");
+        }
+    });
+
+    // DELETE /api/alias/:email - Browser-compatible delete, scoped by key.
     svr.Delete(R"(/api/alias/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
         std::string email = req.matches[1];
+        const std::string api_key = get_api_key(req);
+        if (!db_.api_key_owns_alias(api_key, email)) {
+            res.status = 404;
+            res.set_content(R"({"error":"Alias not found"})", "application/json");
+            return;
+        }
         if (db_.delete_alias(email)) {
             res.set_content(R"({"success":true})", "application/json");
         } else {
@@ -298,11 +376,12 @@ void TempMailServer::start() {
         }
     });
 
-    // DELETE /api/emails/:email - Clear all emails for alias (keep alias)
+    // DELETE /api/emails/:email - Clear key-owned alias messages.
     svr.Delete(R"(/api/emails/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
         std::string email = req.matches[1];
-        auto alias = db_.get_alias(email);
-        if (!alias) {
+        const std::string api_key = get_api_key(req);
+        auto alias = db_.get_alias_by_api_key(api_key);
+        if (!alias || alias->email != email) {
             res.status = 404;
             res.set_content(R"({"error":"Alias not found"})", "application/json");
             return;
@@ -312,11 +391,12 @@ void TempMailServer::start() {
         res.set_content(j.dump(), "application/json");
     });
 
-    // GET /api/check/:email - Poll for new emails
+    // GET /api/check/:email - Check key-owned alias for new mail.
     svr.Get(R"(/api/check/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
         std::string email = req.matches[1];
-        auto alias = db_.get_alias(email);
-        if (!alias) {
+        const std::string api_key = get_api_key(req);
+        auto alias = db_.get_alias_by_api_key(api_key);
+        if (!alias || alias->email != email) {
             res.status = 404;
             res.set_content(R"({"error":"Alias not found"})", "application/json");
             return;
@@ -502,9 +582,10 @@ void TempMailServer::start() {
                 res.set_content(R"({"error":"Invalid email fields"})", "application/json");
                 return;
             }
-            if (!db_.get_alias(from_email).has_value()) {
+            const std::string api_key = get_api_key(req);
+            if (!db_.api_key_owns_alias(api_key, from_email)) {
                 res.status = 403;
-                res.set_content(R"({"error":"Sender must be an active alias"})", "application/json");
+                res.set_content(R"({"error":"Sender must belong to the API key"})", "application/json");
                 return;
             }
 
@@ -539,11 +620,54 @@ void TempMailServer::start() {
 
     // ── AUTOMATION API ──
 
-    // GET /api/wait/{email}?after=0&timeout=30 - Wait for new email (long polling)
+    // GET /api/wait?key=temp-... - Wait for mail on the alias owned by key.
+    svr.Get("/api/wait", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string api_key = get_api_key(req);
+        auto alias = db_.get_alias_by_api_key(api_key);
+        if (!alias) { auth_error(res); return; }
+        int after = 0;
+        int timeout = 30;
+        if (!parse_bounded_int(req, "after", 0, 0, INT_MAX, after) ||
+            !parse_bounded_int(req, "timeout", 30, 1, 120, timeout)) {
+            res.status = 400;
+            res.set_content(R"({"error":"Invalid wait parameters"})", "application/json");
+            return;
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout);
+        std::unique_lock<std::mutex> event_lock(event_mutex_);
+        std::uint64_t observed_version = email_event_version_;
+        while (true) {
+            event_lock.unlock();
+            auto emails = db_.get_emails(alias->id, after);
+            if (!emails.empty()) {
+                const auto& e = emails[0];
+                json j = {{"id", e.id}, {"email", alias->email}, {"from_address", e.from_address},
+                          {"subject", e.subject}, {"body_text", e.body_text},
+                          {"body_html", e.body_html}, {"received_at", e.received_at},
+                          {"is_read", e.is_read}};
+                res.set_header("Cache-Control", "no-store");
+                res.set_content(j.dump(), "application/json");
+                return;
+            }
+            event_lock.lock();
+            if (std::chrono::steady_clock::now() >= deadline || stopping_.load()) {
+                res.status = 408;
+                res.set_content(R"({"error":"Timeout"})", "application/json");
+                return;
+            }
+            email_event_.wait_until(event_lock, deadline, [&]() {
+                return stopping_.load() || email_event_version_ != observed_version;
+            });
+            observed_version = email_event_version_;
+        }
+    });
+
+    // Legacy browser path, retained but scoped by API key.
     svr.Get(R"(/api/wait/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
         std::string email = req.matches[1];
-        auto alias = db_.get_alias(email);
-        if (!alias) {
+        const std::string api_key = get_api_key(req);
+        auto alias = db_.get_alias_by_api_key(api_key);
+        if (!alias || alias->email != email) {
             res.status = 404;
             res.set_content(R"({"error":"Alias not found"})", "application/json");
             return;
@@ -587,9 +711,15 @@ void TempMailServer::start() {
         }
     });
 
-    // GET /api/extract/{email_id} - Extract token/code/link from email
+    // GET /api/extract/{email_id} - Extract data only for the key-owned alias.
     svr.Get(R"(/api/extract/(\d+))", [this](const httplib::Request& req, httplib::Response& res) {
         int email_id = std::stoi(req.matches[1]);
+        const std::string api_key = get_api_key(req);
+        if (!db_.api_key_owns_email(api_key, email_id)) {
+            res.status = 404;
+            res.set_content(R"({"error":"Email not found"})", "application/json");
+            return;
+        }
         auto email = db_.get_email(email_id);
         if (!email) {
             res.status = 404;

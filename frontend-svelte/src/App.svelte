@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { generateAlias, getAliases, getEmails, deleteAlias, waitForNewEmail, sendEmail } from './lib/api';
+  import { generateAlias, generateCustomAlias, getAliases, getEmails, deleteAlias, waitForNewEmail, sendEmail, getAliasApiKey } from './lib/api';
   import { formatSender, buildEmailDocument, renderPlainText, fmtDate, DURATIONS } from './lib/helpers';
 
   let aliases = [];
@@ -38,7 +38,7 @@
   function handleCopy(email) { navigator.clipboard.writeText(email || activeAlias?.email || ''); showToastMessage(); }
   async function handleRefresh() { if (!activeAlias) return; refreshing = true; await loadEmails(activeAlias.email); setTimeout(() => refreshing = false, 800); }
   async function handleDelete(email) { if (!confirm('Hapus email ini?')) return; await deleteAlias(email); if (activeAlias?.email === email) { activeAlias = null; emails = []; selectedEmail = null; stopPolling(); } await loadAliases(); }
-  async function handleCustomEmail() { loading = true; try { const em = changeUsername ? changeUsername + '@' + emailDomain : ''; const body = { duration }; if (em) body.email = em; const res = await fetch('/api/alias', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const d = await res.json(); if (d.email) { activeAlias = d; selectedEmail = null; emails = []; lastEmailId = 0; await loadAliases(); await loadEmails(d.email); startPolling(); } } catch {} loading = false; showChange = false; changeUsername = ''; }
+  async function handleCustomEmail() { loading = true; try { const em = changeUsername ? changeUsername + '@' + emailDomain : ''; const d = em ? await generateCustomAlias(em, duration) : await generateAlias(duration); if (d.email) { activeAlias = d; selectedEmail = null; emails = []; lastEmailId = 0; await loadAliases(); await loadEmails(d.email); startPolling(); } } catch {} loading = false; showChange = false; changeUsername = ''; }
   function handleRandom() { const names = ['andi','budi','citra','dewi','eko','fajar','gilang','hadi','indra','joko','kurnia','lukman','maman','nanda','opik','pratama','rahmat','sandi','taufik','udin','vicky','wahyu','yusuf','zainal','bayu','candra','dian','erwin','fauzi','gunawan']; const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'; const name = names[Math.floor(Math.random() * names.length)]; let s = ''; for (let i = 0; i < 3; i++) s += chars[Math.floor(Math.random() * chars.length)]; changeUsername = name + s; }
   async function handleSend() { sending = true; sendError = ''; try { const r = await sendEmail(sendFrom, sendName, sendTo, sendSubject, sendBody); if (r.success) { showSend = false; showToastMessage(); } else sendError = r.error || 'Gagal'; } catch { sendError = 'Error'; } sending = false; }
   function selectAlias(a) { activeAlias = a; selectedEmail = null; loadEmails(a.email); startPolling(); if (a.email.split('@')[1]) emailDomain = a.email.split('@')[1]; }
@@ -140,9 +140,15 @@
   <div class="max-w-lg mx-auto px-4 pb-20 space-y-4">
     {#if activeAlias}
       <div class="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-2.5 bg-gray-800/80 border-b border-gray-700/50">
-          <span class="text-sm font-mono text-purple-300 truncate">{activeAlias.email}</span>
-          <button on:click={() => handleCopy()} class="text-gray-400 hover:text-white transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+        <div class="px-4 py-2.5 bg-gray-800/80 border-b border-gray-700/50 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-sm font-mono text-purple-300 truncate">{activeAlias.email}</span>
+            <button on:click={() => handleCopy()} title="Copy email" class="text-gray-400 hover:text-white transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[11px] text-gray-500">Automation API Key</span>
+            <button on:click={() => handleCopy(getAliasApiKey(activeAlias.email))} class="max-w-[70%] truncate text-[11px] font-mono text-green-400 hover:text-green-300" title="Copy API key">{getAliasApiKey(activeAlias.email) || 'Unavailable'}</button>
+          </div>
         </div>
         <div class="grid grid-cols-2 gap-px bg-gray-700/50 m-4 rounded-xl overflow-hidden">
           <button on:click={() => showChange = true} class="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Change</button>

@@ -25,7 +25,8 @@ void Database::init_schema() {
             id TEXT PRIMARY KEY,
             email TEXT UNIQUE NOT NULL,
             created_at DATETIME DEFAULT (datetime('now')),
-            expires_at DATETIME NOT NULL
+            expires_at DATETIME NOT NULL,
+            api_key TEXT UNIQUE
         );
         CREATE TABLE IF NOT EXISTS emails (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,16 +51,41 @@ void Database::init_schema() {
         sqlite3_free(err);
         throw std::runtime_error("Schema init failed: " + e);
     }
+
+    // Backward-compatible migration: existing aliases remain valid and keep
+    // api_key NULL. Every newly generated alias receives its own key.
+    bool has_api_key = false;
+    sqlite3_stmt* info = nullptr;
+    if (sqlite3_prepare_v2(db_, "PRAGMA table_info(aliases)", -1, &info, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(info) == SQLITE_ROW) {
+            const unsigned char* name = sqlite3_column_text(info, 1);
+            if (name && std::string(reinterpret_cast<const char*>(name)) == "api_key") {
+                has_api_key = true;
+                break;
+            }
+        }
+    }
+    sqlite3_finalize(info);
+    if (!has_api_key) {
+        if (sqlite3_exec(db_, "ALTER TABLE aliases ADD COLUMN api_key TEXT", nullptr, nullptr, &err) != SQLITE_OK) {
+            std::string e = err ? err : "unknown error";
+            sqlite3_free(err);
+            throw std::runtime_error("API key migration failed: " + e);
+        }
+    }
+    sqlite3_exec(db_, "CREATE UNIQUE INDEX IF NOT EXISTS idx_aliases_api_key ON aliases(api_key) WHERE api_key IS NOT NULL", nullptr, nullptr, nullptr);
 }
 
-Alias Database::create_alias(const std::string& email, const std::string& expires_at) {
+Alias Database::create_alias(const std::string& email, const std::string& expires_at,
+                             const std::string& api_key) {
     std::lock_guard<std::mutex> lock(mutex_);
     Alias a;
-    const char* sql = "INSERT INTO aliases (id, email, expires_at) VALUES (lower(hex(randomblob(16))), ?, ?) RETURNING id, email, created_at, expires_at";
+    const char* sql = "INSERT INTO aliases (id, email, expires_at, api_key) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, '')) RETURNING id, email, created_at, expires_at";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
     sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, expires_at.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, api_key.c_str(), -1, SQLITE_TRANSIENT);
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         a.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
         a.email = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
@@ -95,17 +121,66 @@ std::optional<Alias> Database::get_alias(const std::string& email) {
     return result;
 }
 
-std::vector<Alias> Database::get_active_aliases() {
+std::optional<Alias> Database::get_alias_by_api_key(const std::string& api_key) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const char* sql = R"(
+        SELECT a.id, a.email, a.created_at, a.expires_at, COUNT(e.id)
+        FROM aliases a LEFT JOIN emails e ON a.id = e.alias_id
+        WHERE a.api_key = ? AND a.expires_at > datetime('now') GROUP BY a.id
+    )";
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, api_key.c_str(), -1, SQLITE_TRANSIENT);
+    std::optional<Alias> result;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        Alias a;
+        a.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+        a.email = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        a.created_at = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+        a.expires_at = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+        a.email_count = sqlite3_column_int(stmt, 4);
+        result = a;
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+bool Database::api_key_owns_alias(const std::string& api_key, const std::string& email) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_, "SELECT 1 FROM aliases WHERE api_key = ? AND email = ? AND expires_at > datetime('now')", -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, api_key.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, email.c_str(), -1, SQLITE_TRANSIENT);
+    const bool found = sqlite3_step(stmt) == SQLITE_ROW;
+    sqlite3_finalize(stmt);
+    return found;
+}
+
+bool Database::api_key_owns_email(const std::string& api_key, int email_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = "SELECT 1 FROM emails e JOIN aliases a ON a.id = e.alias_id WHERE e.id = ? AND a.api_key = ? AND a.expires_at > datetime('now')";
+    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+    sqlite3_bind_int(stmt, 1, email_id);
+    sqlite3_bind_text(stmt, 2, api_key.c_str(), -1, SQLITE_TRANSIENT);
+    const bool found = sqlite3_step(stmt) == SQLITE_ROW;
+    sqlite3_finalize(stmt);
+    return found;
+}
+
+std::vector<Alias> Database::get_active_aliases(const std::string& api_key) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<Alias> aliases;
     const char* sql = R"(
         SELECT a.id, a.email, a.created_at, a.expires_at, COUNT(e.id)
         FROM aliases a LEFT JOIN emails e ON a.id = e.alias_id
-        WHERE a.expires_at > datetime('now')
+        WHERE a.expires_at > datetime('now') AND (? = '' OR a.api_key = ?)
         GROUP BY a.id ORDER BY a.created_at DESC
     )";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, api_key.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, api_key.c_str(), -1, SQLITE_TRANSIENT);
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         Alias a;
         a.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
@@ -138,6 +213,30 @@ bool Database::delete_alias(const std::string& email) {
     sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
     ok = sqlite3_step(stmt) == SQLITE_DONE;
     int deleted = sqlite3_changes(db_);
+    sqlite3_finalize(stmt);
+    sqlite3_exec(db_, ok ? "COMMIT" : "ROLLBACK", nullptr, nullptr, nullptr);
+    return ok && deleted > 0;
+}
+
+bool Database::delete_alias_by_api_key(const std::string& api_key) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    sqlite3_exec(db_, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr);
+    sqlite3_stmt* stmt = nullptr;
+    const char* delete_emails = "DELETE FROM emails WHERE alias_id IN (SELECT id FROM aliases WHERE api_key = ?)";
+    if (sqlite3_prepare_v2(db_, delete_emails, -1, &stmt, nullptr) != SQLITE_OK) {
+        sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, api_key.c_str(), -1, SQLITE_TRANSIENT);
+    bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    if (!ok || sqlite3_prepare_v2(db_, "DELETE FROM aliases WHERE api_key = ?", -1, &stmt, nullptr) != SQLITE_OK) {
+        sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, api_key.c_str(), -1, SQLITE_TRANSIENT);
+    ok = sqlite3_step(stmt) == SQLITE_DONE;
+    const int deleted = sqlite3_changes(db_);
     sqlite3_finalize(stmt);
     sqlite3_exec(db_, ok ? "COMMIT" : "ROLLBACK", nullptr, nullptr, nullptr);
     return ok && deleted > 0;

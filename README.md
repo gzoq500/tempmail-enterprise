@@ -146,6 +146,64 @@ systemctl is-active tempmail-backend caddy postfix
 postqueue -p
 ```
 
+## Automation API Keys
+
+Every newly generated alias receives its own bearer key:
+
+```json
+{
+  "email": "example123@example.com",
+  "api_key": "temp-<64 random hexadecimal characters>"
+}
+```
+
+The browser stores the `email + api_key` pair in localStorage and shows the key in the alias panel. One key can access only the alias created with it.
+
+### Generate alias and key
+
+```bash
+curl -sS -X POST https://tempmail.example.com/api/alias \
+  -H 'Content-Type: application/json' \
+  -d '{"duration":"1h"}'
+```
+
+### Read messages
+
+Query parameter (convenient for automation URLs):
+
+```bash
+curl -sS 'https://tempmail.example.com/api/messages?key=temp-...'
+```
+
+Header (recommended when possible):
+
+```bash
+curl -sS https://tempmail.example.com/api/messages \
+  -H 'X-API-Key: temp-...'
+```
+
+### Wait for a new message
+
+```bash
+curl -sS 'https://tempmail.example.com/api/wait?key=temp-...&after=0&timeout=30'
+```
+
+### Extract OTP, token, or magic link
+
+```bash
+curl -sS 'https://tempmail.example.com/api/extract/123?key=temp-...'
+```
+
+### Delete the alias and invalidate its key
+
+```bash
+curl -sS -X DELETE 'https://tempmail.example.com/api/alias?key=temp-...'
+```
+
+`POST /api/incoming` intentionally remains keyless because Cloudflare Email Routing and Postfix deliver by recipient alias. All browser/automation read, wait, extract, delete, and send operations require the matching alias key. API-key responses use `Cache-Control: no-store`.
+
+Existing aliases created before the API-key migration remain in the database but do not receive a retroactive key. New aliases always receive one.
+
 ## Renderer Behavior
 
 HTML email is mounted into an isolated Shadow DOM root. Sender styles remain scoped to the email while the content stays in the main page compositor tree for smooth mobile scrolling. Images and tables are constrained to the viewport. CSS animations and transitions are frozen to avoid layout churn during scroll. Links open in a new tab with `noopener noreferrer`.
