@@ -58,6 +58,7 @@
     toastTimer = setTimeout(() => { showToast = false; toastTimer = null; }, 2000);
   }
   function handleCopy(email) { navigator.clipboard.writeText(email || activeAlias?.email || ''); showToastMessage(); }
+  function handleCopyApiKey() { handleCopy(getAliasApiKey(activeAlias?.email || '')); }
   async function handleRefresh() { if (!activeAlias) return; refreshing = true; await loadEmails(activeAlias.email); setTimeout(() => refreshing = false, 800); }
   async function handleDelete(email) { if (!confirm('Hapus email ini?')) return; await deleteAlias(email); if (activeAlias?.email === email) { activeAlias = null; emails = []; selectedEmail = null; stopPolling(); } await loadAliases(); }
   async function handleCustomEmail() { loading = true; try { const em = changeUsername ? changeUsername + '@' + emailDomain : ''; const d = em ? await generateCustomAlias(em, duration) : await generateAlias(duration); if (d.email) { activeAlias = d; selectedEmail = null; emails = []; lastEmailId = 0; await loadAliases(); await loadEmails(d.email); startPolling(); } } catch {} loading = false; showChange = false; changeUsername = ''; }
@@ -179,18 +180,12 @@
         <div class="px-4 py-3 bg-gray-800/80 border-b border-gray-700/50 space-y-2.5">
           <div>
             <span class="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Email</span>
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-sm font-mono text-purple-300 truncate">{activeAlias.email}</span>
-              <button on:click={() => handleCopy()} title="Copy email" class="flex-shrink-0 p-1.5 -mr-1 rounded-md text-gray-400 hover:text-white hover:bg-gray-700/60 active:scale-95 transition-all"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-12a2 2 0 00-2-2h-2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11h10a2 2 0 012 2v8a2 2 0 01-2 2h-10a2 2 0 01-2-2v-8a2 2 0 012-2z"/></svg></button>
-            </div>
+            <span class="block text-sm font-mono text-purple-300 truncate">{activeAlias.email}</span>
           </div>
           <div>
-            <span class="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Automation API Key</span>
-            <div class="flex items-center gap-1.5">
-              <div class="flex-1 min-w-0 overflow-x-auto whitespace-nowrap scrollbar-thin" style="-webkit-overflow-scrolling:touch;">
-                <code class="text-[11px] font-mono text-green-400">{getAliasApiKey(activeAlias.email) || 'Unavailable'}</code>
-              </div>
-              <button on:click={() => handleCopy(getAliasApiKey(activeAlias.email))} title="Copy API key" class="flex-shrink-0 p-1.5 -mr-1 rounded-md text-gray-400 hover:text-white hover:bg-gray-700/60 active:scale-95 transition-all"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-12a2 2 0 00-2-2h-2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11h10a2 2 0 012 2v8a2 2 0 01-2 2h-10a2 2 0 01-2-2v-8a2 2 0 012-2z"/></svg></button>
+            <span class="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Automation API Key <span class="normal-case text-gray-600">— ketuk untuk menyalin</span></span>
+            <div class="overflow-x-auto whitespace-nowrap scrollbar-thin cursor-pointer active:bg-gray-700/40 rounded-md -mx-1 px-1 py-0.5 transition-colors" style="-webkit-overflow-scrolling:touch;" role="button" tabindex="0" on:click={handleCopyApiKey} on:keydown={(e) => e.key === 'Enter' && handleCopyApiKey()}>
+              <code class="text-[11px] font-mono text-green-400">{getAliasApiKey(activeAlias.email) || 'Unavailable'}</code>
             </div>
           </div>
         </div>
