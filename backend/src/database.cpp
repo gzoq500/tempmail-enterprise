@@ -79,6 +79,12 @@ void Database::init_schema() {
         }
     }
     sqlite3_exec(db_, "CREATE UNIQUE INDEX IF NOT EXISTS idx_aliases_api_key ON aliases(api_key) WHERE api_key IS NOT NULL", nullptr, nullptr, nullptr);
+    // Fast deterministic lookup index for hashed API keys. The lookup value is
+    // HMAC(master, key) — an attacker with the DB alone cannot reverse it
+    // without the Kyber-protected master key, and it lets auth use an indexed
+    // O(1) seek instead of scanning every alias.
+    sqlite3_exec(db_, "ALTER TABLE aliases ADD COLUMN key_lookup BLOB", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_aliases_key_lookup ON aliases(key_lookup)", nullptr, nullptr, nullptr);
 }
 
 Alias Database::create_alias(const std::string& email, const std::string& expires_at,
@@ -94,13 +100,17 @@ Alias Database::create_alias(const std::string& email, const std::string& expire
     const std::string key_hash = api_key.empty()
         ? std::string()
         : tempmail_crypto::hash_api_key(alias_id, api_key);
-    const char* sql = "INSERT INTO aliases (id, email, expires_at, api_key) VALUES (?, ?, ?, NULLIF(?, '')) RETURNING id, email, created_at, expires_at";
+    const std::string key_lookup = (api_key.empty() || master_key_.empty())
+        ? std::string()
+        : tempmail_crypto::hmac_sha256(master_key_, api_key);
+    const char* sql = "INSERT INTO aliases (id, email, expires_at, api_key, key_lookup) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, '')) RETURNING id, email, created_at, expires_at";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
     sqlite3_bind_text(stmt, 1, alias_id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, email.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, expires_at.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 4, key_hash.c_str(), static_cast<int>(key_hash.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_blob(stmt, 5, key_lookup.data(), static_cast<int>(key_lookup.size()), SQLITE_TRANSIENT);
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         a.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
         a.email = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
@@ -142,6 +152,33 @@ std::optional<Alias> Database::get_alias_by_api_key(const std::string& api_key) 
     // lookup, so scan active keyed aliases and compare in constant time.
     // Alias counts are small (temporary inboxes), making this scan cheap.
     if (api_key.empty()) return std::nullopt;
+    // Fast path: deterministic HMAC(master, key) lookup via index — O(1).
+    if (!master_key_.empty()) {
+        const std::string lookup = tempmail_crypto::hmac_sha256(master_key_, api_key);
+        const char* idx_sql = R"(
+            SELECT a.id, a.email, a.created_at, a.expires_at, a.api_key, COUNT(e.id)
+            FROM aliases a LEFT JOIN emails e ON a.id = e.alias_id
+            WHERE a.key_lookup = ? AND a.expires_at > datetime('now')
+            GROUP BY a.id
+        )";
+        sqlite3_stmt* idx_stmt = nullptr;
+        sqlite3_prepare_v2(db_, idx_sql, -1, &idx_stmt, nullptr);
+        sqlite3_bind_blob(idx_stmt, 1, lookup.data(), static_cast<int>(lookup.size()), SQLITE_STATIC);
+        std::optional<Alias> indexed;
+        if (sqlite3_step(idx_stmt) == SQLITE_ROW) {
+            Alias a;
+            a.id = reinterpret_cast<const char*>(sqlite3_column_text(idx_stmt, 0));
+            a.email = reinterpret_cast<const char*>(sqlite3_column_text(idx_stmt, 1));
+            a.created_at = reinterpret_cast<const char*>(sqlite3_column_text(idx_stmt, 2));
+            a.expires_at = reinterpret_cast<const char*>(sqlite3_column_text(idx_stmt, 3));
+            a.email_count = sqlite3_column_int(idx_stmt, 5);
+            indexed = a;
+        }
+        sqlite3_finalize(idx_stmt);
+        if (indexed) return indexed;
+        // Miss on the index: fall through only for legacy rows that predate
+        // key_lookup (they still carry hashes/plaintext in api_key).
+    }
     const char* sql = R"(
         SELECT a.id, a.email, a.created_at, a.expires_at, a.api_key, COUNT(e.id)
         FROM aliases a LEFT JOIN emails e ON a.id = e.alias_id
