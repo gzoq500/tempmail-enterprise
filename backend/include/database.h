@@ -48,7 +48,9 @@ public:
     int store_email(const std::string& alias_id, const std::string& from,
                     const std::string& to, const std::string& subject,
                     const std::string& body_text, const std::string& body_html = "");
-    std::vector<Email> get_emails(const std::string& alias_id, int after_id = 0);
+    // include_bodies=false skips body decryption for fast inbox listings.
+    std::vector<Email> get_emails(const std::string& alias_id, int after_id = 0,
+                                  bool include_bodies = true);
     std::optional<Email> get_email(int id);
     bool mark_read(int id);
     bool mark_alias_read(const std::string& alias_id);

@@ -28,6 +28,23 @@
 
   async function loadAliases() { try { aliases = (await getAliases()).aliases; } catch {} }
   async function loadEmails(email) { try { const d = await getEmails(email); emails = d.emails; if (d.emails.length > 0) lastEmailId = Math.max(...d.emails.map(e => e.id)); } catch {} }
+  // Inbox items arrive metadata-only; fetch the body when an email is opened.
+  let openingEmail = false;
+  async function openEmail(emailRow) {
+    selectedEmail = emailRow; stopPolling();
+    if (emailRow.body_html !== undefined || emailRow.body_text !== undefined) return;
+    if (openingEmail) return;
+    openingEmail = true;
+    try {
+      const key = getAliasApiKey(emailRow.to_address || activeAlias?.email || '');
+      const res = await fetch('/api/email/' + emailRow.id, { headers: key ? { 'X-API-Key': key } : {} });
+      if (res.ok) {
+        const full = await res.json();
+        if (selectedEmail && selectedEmail.id === full.id) selectedEmail = full;
+      }
+    } catch {}
+    openingEmail = false;
+  }
   async function handleGenerate() { loading = true; try { const a = await generateAlias(duration); activeAlias = a; selectedEmail = null; emails = []; lastEmailId = 0; await loadAliases(); await loadEmails(a.email); startPolling(); } catch {} loading = false; }
   let toastTimer = null;
   function showToastMessage() {
@@ -206,7 +223,7 @@
         {:else}
           <div class="divide-y divide-gray-800/30">
             {#each emails as email (email.id)}
-              <button on:click={() => { selectedEmail = email; stopPolling(); }} class="w-full flex items-start gap-3 p-4 hover:bg-gray-800/30 cursor-pointer transition-colors text-left">
+              <button on:click={() => openEmail(email)} class="w-full flex items-start gap-3 p-4 hover:bg-gray-800/30 cursor-pointer transition-colors text-left">
                 <div class="w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 {email.is_read ? 'bg-gray-600' : 'bg-purple-400'}"></div>
                 <div class="flex-1 min-w-0">
                   <div class="font-semibold text-gray-200 text-sm truncate">{formatSender(email.from_address)}</div>

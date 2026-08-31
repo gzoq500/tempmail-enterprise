@@ -51,6 +51,10 @@ target_compile_options(kyber768 PRIVATE -O2 -w)
 
 find_package(Threads REQUIRED)
 
+# cpp-httplib defaults to a listen backlog of 5 — under concurrent floods the
+# kernel drops/resets connections before accept(). Raise it.
+add_compile_definitions(CPPHTTPLIB_LISTEN_BACKLOG=512)
+
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/third_party
