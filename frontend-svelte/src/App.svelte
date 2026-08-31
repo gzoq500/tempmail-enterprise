@@ -140,19 +140,27 @@
   <div class="max-w-lg mx-auto px-4 pb-20 space-y-4">
     {#if activeAlias}
       <div class="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
-        <div class="px-4 py-2.5 bg-gray-800/80 border-b border-gray-700/50 space-y-2">
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-sm font-mono text-purple-300 truncate">{activeAlias.email}</span>
-            <button on:click={() => handleCopy()} title="Copy email" class="text-gray-400 hover:text-white transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+        <div class="px-4 py-3 bg-gray-800/80 border-b border-gray-700/50 space-y-2.5">
+          <div>
+            <span class="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Email</span>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-sm font-mono text-purple-300 truncate">{activeAlias.email}</span>
+              <button on:click={() => handleCopy()} title="Copy email" class="flex-shrink-0 p-1.5 -mr-1 rounded-md text-gray-400 hover:text-white hover:bg-gray-700/60 active:scale-95 transition-all"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-12a2 2 0 00-2-2h-2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11h10a2 2 0 012 2v8a2 2 0 01-2 2h-10a2 2 0 01-2-2v-8a2 2 0 012-2z"/></svg></button>
+            </div>
           </div>
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-[11px] text-gray-500">Automation API Key</span>
-            <button on:click={() => handleCopy(getAliasApiKey(activeAlias.email))} class="max-w-[70%] truncate text-[11px] font-mono text-green-400 hover:text-green-300" title="Copy API key">{getAliasApiKey(activeAlias.email) || 'Unavailable'}</button>
+          <div>
+            <span class="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Automation API Key</span>
+            <div class="flex items-center gap-1.5">
+              <div class="flex-1 min-w-0 overflow-x-auto whitespace-nowrap scrollbar-thin" style="-webkit-overflow-scrolling:touch;">
+                <code class="text-[11px] font-mono text-green-400">{getAliasApiKey(activeAlias.email) || 'Unavailable'}</code>
+              </div>
+              <button on:click={() => handleCopy(getAliasApiKey(activeAlias.email))} title="Copy API key" class="flex-shrink-0 p-1.5 -mr-1 rounded-md text-gray-400 hover:text-white hover:bg-gray-700/60 active:scale-95 transition-all"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-12a2 2 0 00-2-2h-2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11h10a2 2 0 012 2v8a2 2 0 01-2 2h-10a2 2 0 01-2-2v-8a2 2 0 012-2z"/></svg></button>
+            </div>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-px bg-gray-700/50 m-4 rounded-xl overflow-hidden">
           <button on:click={() => showChange = true} class="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Change</button>
-          <button on:click={() => handleCopy()} class="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>Copy</button>
+          <button on:click={() => handleCopy()} class="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-12a2 2 0 00-2-2h-2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11h10a2 2 0 012 2v8a2 2 0 01-2 2h-10a2 2 0 01-2-2v-8a2 2 0 012-2z"/></svg>Copy</button>
           <button on:click={() => handleDelete(activeAlias.email)} class="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>Delete</button>
           <button on:click={handleRefresh} class="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200"><svg class="w-4 h-4 text-gray-400 {refreshing ? 'animate-spin' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh</button>
         </div>
