@@ -29,15 +29,20 @@ body {
   font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
 }
 .mailbox-live-dot { width: 6px; height: 6px; border-radius: 999px; background: #34d399; box-shadow: 0 0 0 4px rgba(52,211,153,.08); }
-.mailbox-address-row { display: flex; align-items: flex-end; gap: 12px; }
-.mailbox-label { display: block; margin-bottom: 5px; color: #8b8f98; font-size: 11px; font-weight: 500; }
+.mailbox-info-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.mailbox-info-card { min-width: 0; padding: 14px; border: 1px solid rgba(255,255,255,.07); border-radius: 14px; background: rgba(0,0,0,.14); }
+.mailbox-email-card { background: rgba(129,140,248,.035); }
+.mailbox-key-card { cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.mailbox-key-card:hover { border-color: rgba(129,140,248,.22); background: rgba(129,140,248,.05); }
+.mailbox-key-heading { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.mailbox-label { display: block; margin-bottom: 7px; color: #8b8f98; font-size: 11px; font-weight: 500; }
 .mailbox-address {
   color: #f3f4f6; overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: clamp(14px, 4vw, 17px); font-weight: 500; line-height: 1.35; letter-spacing: -.025em;
 }
 .mailbox-copy-button {
-  display: inline-flex; min-height: 44px; flex: 0 0 auto; align-items: center; gap: 7px;
+  display: inline-flex; min-height: 44px; margin-top: 12px; flex: 0 0 auto; align-items: center; gap: 7px;
   padding: 0 12px; border: 1px solid rgba(255,255,255,.09); border-radius: 10px;
   background: rgba(255,255,255,.055); color: #e5e7eb; font-size: 12px; font-weight: 600;
   transition: background .15s ease, border-color .15s ease, transform .15s ease;
@@ -88,7 +93,6 @@ body {
 
 @media (max-width: 390px) {
   .mailbox-identity { padding: 16px 14px 13px; }
-  .mailbox-address-row { align-items: center; }
   .mailbox-copy-button { padding-inline: 10px; }
   .mailbox-tool { gap: 5px; }
   .mailbox-inbox-header { padding-inline: 15px; }
