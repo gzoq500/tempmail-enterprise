@@ -158,7 +158,7 @@
 </script>
 
 <main class="min-h-screen">
-  <section class="relative pt-10 pb-6 text-center">
+  <section class="relative text-center {activeAlias ? 'pt-7 pb-4' : 'pt-10 pb-6'}">
     <div class="absolute inset-0 overflow-hidden pointer-events-none">
       <!-- Static radial gradients: visually identical to the old blur-2xl orbs
            but zero GPU filter cost while scrolling on mobile. -->
@@ -168,7 +168,7 @@
     <div class="relative z-10 px-4">
       <h1 class="text-4xl md:text-5xl font-bold mb-3"><span class="bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">TempMail</span></h1>
       <p class="text-lg text-gray-300 mb-2">Email Sementara</p>
-      <p class="text-sm text-gray-500 max-w-md mx-auto mb-6">Lindungi privasi Anda dengan email sementara. Generate email random, terima pesan langsung, tanpa registrasi.</p>
+      <p class="text-sm text-gray-400 max-w-md mx-auto mb-6">Lindungi privasi dengan alamat email acak. Terima pesan langsung, tanpa registrasi.</p>
       {#if !activeAlias}
         <div class="space-y-3">
           <div class="flex flex-wrap justify-center gap-2">
@@ -191,32 +191,63 @@
 
   <div class="max-w-lg w-full min-w-0 mx-auto px-4 pb-20 space-y-4 overflow-x-hidden">
     {#if activeAlias}
-      <div class="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
-        <div class="px-4 py-3 bg-gray-800/80 border-b border-gray-700/50 space-y-2.5">
-          <div>
-            <span class="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Email</span>
-            <span class="block text-sm font-mono text-purple-300 truncate">{activeAlias.email}</span>
+      <section class="mailbox-shell">
+        <div class="mailbox-identity">
+          <div class="mailbox-kicker">
+            <span class="mailbox-live-dot"></span>
+            Inbox aktif
           </div>
-          <div>
-            <span class="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Automation API Key <span class="normal-case text-gray-600">— ketuk untuk menyalin</span></span>
-            <div class="overflow-x-auto whitespace-nowrap scrollbar-thin cursor-pointer active:bg-gray-700/40 rounded-md -mx-1 px-1 py-0.5 transition-colors" style="-webkit-overflow-scrolling:touch;" role="button" tabindex="0" on:click={handleCopyApiKey} on:keydown={(e) => e.key === 'Enter' && handleCopyApiKey()}>
-              <code class="text-[11px] font-mono text-green-400">{getAliasApiKey(activeAlias.email) || 'Unavailable'}</code>
+
+          <div class="mailbox-address-row">
+            <div class="min-w-0 flex-1">
+              <span class="mailbox-label">Alamat email kamu</span>
+              <div class="mailbox-address" title={activeAlias.email}>{activeAlias.email}</div>
+            </div>
+            <button on:click={() => handleCopy()} class="mailbox-copy-button" aria-label="Salin alamat email">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" stroke-width="1.8"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              Salin
+            </button>
+          </div>
+
+          <div class="mailbox-key-row" role="button" tabindex="0" on:click={handleCopyApiKey} on:keydown={(e) => e.key === 'Enter' && handleCopyApiKey()}>
+            <div class="mailbox-key-icon">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2" stroke-width="1.8"/><path stroke-linecap="round" stroke-width="1.8" d="M8 10V7a4 4 0 018 0v3"/></svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="mailbox-key-label">Kunci otomatisasi <span>· ketuk untuk menyalin</span></div>
+              <div class="mailbox-key-value">{getAliasApiKey(activeAlias.email) || 'Tidak tersedia'}</div>
             </div>
           </div>
+
+          <div class="mailbox-toolbar">
+            <button on:click={() => showChange = true} class="mailbox-tool">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20 11a8.1 8.1 0 00-15.5-2M4 4v5h5m-5 4a8.1 8.1 0 0015.5 2M20 20v-5h-5"/></svg>
+              Ganti alamat
+            </button>
+            <button on:click={() => { showSend = true; sendFrom = activeAlias?.email || ''; }} class="mailbox-tool">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 4h16v16H4zM4 7l8 6 8-6"/></svg>
+              Kirim email
+            </button>
+            <button on:click={() => handleDelete(activeAlias.email)} class="mailbox-tool mailbox-tool-danger">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16m-10 4v6m4-6v6m1-10V4H9v3m-2 0l1 14h8l1-14"/></svg>
+              Hapus
+            </button>
+          </div>
         </div>
-        <div class="grid grid-cols-2 gap-px bg-gray-700/50 m-4 rounded-xl overflow-hidden">
-          <button on:click={() => showChange = true} class="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Change</button>
-          <button on:click={() => handleCopy()} class="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-12a2 2 0 00-2-2h-2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11h10a2 2 0 012 2v8a2 2 0 01-2 2h-10a2 2 0 01-2-2v-8a2 2 0 012-2z"/></svg>Copy</button>
-          <button on:click={() => handleDelete(activeAlias.email)} class="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>Delete</button>
-          <button on:click={handleRefresh} class="flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 transition-colors text-sm font-medium text-gray-200"><svg class="w-4 h-4 text-gray-400 {refreshing ? 'animate-spin' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh</button>
-        </div>
-      </div>
-      <button on:click={() => { showSend = true; sendFrom = activeAlias?.email || ''; }} class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-800/80 hover:bg-gray-700 text-gray-200 font-medium rounded-xl border border-gray-700/50 transition-all"><svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>Kirim Email</button>
-      <div class="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
-        <div class="flex items-center justify-between p-4 border-b border-gray-800/50">
-          <h2 class="font-bold text-gray-100">Inbox</h2>
-          <button on:click={handleRefresh} class="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800/50 hover:bg-gray-700/50 rounded-lg transition-all"><svg class="w-3.5 h-3.5 {refreshing ? 'animate-spin' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh</button>
-        </div>
+
+        <div class="mailbox-inbox">
+          <div class="mailbox-inbox-header">
+            <div>
+              <div class="flex items-center gap-2">
+                <h2 class="mailbox-inbox-title">Inbox</h2>
+                {#if emails.length > 0}<span class="mailbox-count">{emails.length}</span>{/if}
+              </div>
+              <p class="mailbox-inbox-subtitle">Pesan baru muncul otomatis</p>
+            </div>
+            <button on:click={handleRefresh} class="mailbox-refresh" aria-label="Muat ulang inbox">
+              <svg class="w-4 h-4 {refreshing ? 'animate-spin' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20 11a8.1 8.1 0 00-15.5-2M4 4v5h5m-5 4a8.1 8.1 0 0015.5 2M20 20v-5h-5"/></svg>
+            </button>
+          </div>
         {#if selectedEmail}
           <div class="p-4">
             <button on:click={goBack} class="flex items-center gap-2 text-purple-400 hover:text-purple-300 mb-4 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>Kembali</button>
@@ -244,26 +275,32 @@
             </div>
           </div>
         {:else if emails.length === 0}
-          <div class="flex flex-col items-center justify-center py-16 px-4">
-            <div class="w-20 h-20 bg-gray-800/50 rounded-2xl flex items-center justify-center mb-6"><svg class="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg></div>
-            <p class="font-bold text-gray-400 text-lg">Belum ada email</p>
-            <p class="text-gray-600 text-sm mt-1">Email yang masuk akan muncul di sini</p>
+          <div class="mailbox-empty">
+            <div class="mailbox-empty-art" aria-hidden="true">
+              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16v12H4zM4 8l8 6 8-6"/></svg>
+            </div>
+            <p class="mailbox-empty-title">Belum ada email</p>
+            <p class="mailbox-empty-copy">Gunakan alamat di atas. Pesan baru akan muncul otomatis.</p>
           </div>
         {:else}
-          <div class="divide-y divide-gray-800/30">
+          <div class="mailbox-message-list">
             {#each emails as email (email.id)}
-              <button on:click={() => openEmail(email)} class="w-full flex items-start gap-3 p-4 hover:bg-gray-800/30 cursor-pointer transition-colors text-left">
-                <div class="w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 {email.is_read ? 'bg-gray-600' : 'bg-purple-400'}"></div>
+              <button on:click={() => openEmail(email)} class="mailbox-message email-list-item">
+                <div class="mailbox-unread {email.is_read ? 'is-read' : ''}"></div>
                 <div class="flex-1 min-w-0">
-                  <div class="font-semibold text-gray-200 text-sm truncate">{formatSender(email.from_address)}</div>
-                  <div class="text-gray-400 text-sm truncate">{email.subject || '(Tanpa subjek)'}</div>
-                  <div class="text-gray-600 text-xs mt-1">{fmtDate(email.received_at)}</div>
+                  <div class="mailbox-message-top">
+                    <div class="mailbox-message-sender">{formatSender(email.from_address)}</div>
+                    <div class="mailbox-message-time">{fmtDate(email.received_at)}</div>
+                  </div>
+                  <div class="mailbox-message-subject">{email.subject || '(Tanpa subjek)'}</div>
                 </div>
+                <svg class="mailbox-message-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 5l7 7-7 7"/></svg>
               </button>
             {/each}
           </div>
         {/if}
-      </div>
+        </div>
+      </section>
     {/if}
 
     {#if !activeAlias && aliases.length > 0}
