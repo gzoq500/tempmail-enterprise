@@ -1,0 +1,52 @@
+# Node / frontend
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+
+# C++ build artifacts
+build/
+cmake-build-*/
+*.o
+*.a
+*.so
+
+# Runtime data and secrets
+.env
+.env.*
+!.env.example
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+backend/data/
+data/
+logs/
+backups/
+
+# Mail/session/private data
+*.eml
+*.mbox
+*.session
+*.session-journal
+
+# Diagnostics / Python caches
+*.log
+*.pcap
+*.har
+*.prof
+coverage/
+__pycache__/
+*.py[cod]
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Kyber key material / crypto envelopes
+keys/
+*.kyber-envelope
+mlkem768.pk
+mlkem768.sk
