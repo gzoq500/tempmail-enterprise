@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 96" role="img" aria-labelledby="title desc">
+  <title id="title">TempMail</title>
+  <desc id="desc">Modern rounded orange envelope</desc>
+  <defs>
+    <linearGradient id="body" x1="0" y1="10" x2="0" y2="91" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff9a3d"/>
+      <stop offset="0.52" stop-color="#f97816"/>
+      <stop offset="1" stop-color="#df5000"/>
+    </linearGradient>
+    <linearGradient id="flap" x1="0" y1="12" x2="0" y2="57" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffd08a"/>
+      <stop offset="0.5" stop-color="#ffb45f"/>
+      <stop offset="1" stop-color="#ff9131"/>
+    </linearGradient>
+    <linearGradient id="leftFold" x1="10" y1="26" x2="57" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff922e"/>
+      <stop offset="1" stop-color="#ed6509"/>
+    </linearGradient>
+    <linearGradient id="rightFold" x1="110" y1="26" x2="63" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f47b18"/>
+      <stop offset="1" stop-color="#d94d00"/>
+    </linearGradient>
+    <linearGradient id="front" x1="0" y1="49" x2="0" y2="91" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ee6a0b"/>
+      <stop offset="1" stop-color="#cf4500"/>
+    </linearGradient>
+    <linearGradient id="highlight" x1="22" y1="15" x2="88" y2="71" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff2d5" stop-opacity="0.52"/>
+      <stop offset="0.52" stop-color="#fff2d5" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#fff2d5" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="clip">
+      <rect x="7" y="7" width="106" height="82" rx="19"/>
+    </clipPath>
+  </defs>
+
+  <rect x="7" y="7" width="106" height="82" rx="19" fill="url(#body)"/>
+  <g clip-path="url(#clip)">
+    <path d="M7 20 55 56c3 2.4 7 2.4 10 0l48-36v69H7Z" fill="url(#front)"/>
+    <path d="m7 22 47 34L7 88Z" fill="url(#leftFold)"/>
+    <path d="m113 22-47 34 47 32Z" fill="url(#rightFold)"/>
+    <path d="M7 10h106v9L65 56c-3 2.5-7 2.5-10 0L7 19Z" fill="url(#flap)"/>
+    <path d="M10 9h96L61 51c-1.2 1.1-2.9 1.1-4.1 0Z" fill="url(#highlight)"/>
+    <path d="m7 88 48-35c3-2.3 7-2.3 10 0l48 35Z" fill="url(#front)" opacity="0.78"/>
+  </g>
+</svg>
