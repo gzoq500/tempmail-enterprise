@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
+  <title id="title">TempMail</title>
+  <desc id="desc">TempMail postal monogram with smooth rounded corners</desc>
+  <rect x="6" y="6" width="84" height="84" rx="22" ry="22" fill="#d85a2b" stroke="#17191c" stroke-width="5"/>
+  <rect x="18" y="26" width="60" height="42" rx="10" ry="10" fill="#fffdf9" stroke="#17191c" stroke-width="4.5"/>
+  <path d="M21 30 48 51 75 30" fill="none" stroke="#17191c" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M21 64 39 48M75 64 57 48" fill="none" stroke="#17191c" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="74" cy="74" r="7" fill="#17191c"/>
+</svg>

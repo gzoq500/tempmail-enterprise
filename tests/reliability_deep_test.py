@@ -2,9 +2,7 @@
 """Reliability regressions: burst wait ordering + invalid SMTP bytes."""
 from __future__ import annotations
 import json, os, shutil, subprocess, tempfile, time, urllib.request, urllib.error
-from pathlib import Path
-REPO_ROOT=Path(__file__).resolve().parents[1]
-BIN=os.environ.get('TEMPMAIL_TEST_BIN',str(REPO_ROOT/'backend/build/tempmail-server')); PORT=3153; BASE=f'http://127.0.0.1:{PORT}'
+BIN='/opt/tempmail/backend/build/tempmail-server'; PORT=3153; BASE=f'http://127.0.0.1:{PORT}'
 def call(p,m='GET',d=None,key=None,timeout=15):
  data=json.dumps(d).encode() if d is not None else None; h={'Content-Type':'application/json'} if d is not None else {}
  if key:h['X-API-Key']=key
@@ -31,7 +29,7 @@ def main():
   print('wait-order',seen)
   if seen != ['Burst 111111','Burst 222222','Burst 333333']:bad.append('wait burst skipped/reordered messages')
   # The SMTP handler must not crash with exit 1 on arbitrary message bytes.
-  handler=os.environ.get('TEMPMAIL_HANDLER_PATH',str(REPO_ROOT/'scripts/tempmail-handler'))
+  handler=os.environ.get('TEMPMAIL_HANDLER_PATH','/usr/local/bin/tempmail-handler')
   handler_env=dict(os.environ,TEMPMAIL_API_URL=BASE+'/api/incoming')
   raw=b'From: bad@example.com\nTo: nobody@routerssh.web.id\nSubject: invalid byte\n\nbody:\xff\n'
   hp=subprocess.run([handler,'bad@example.com','nobody@routerssh.web.id'],input=raw,capture_output=True,env=handler_env)

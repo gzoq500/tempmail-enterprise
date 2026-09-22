@@ -2,9 +2,7 @@
 """Deep MIME fixtures against isolated staging backend."""
 import json, os, shutil, subprocess, tempfile, time, urllib.request, urllib.error
 
-from pathlib import Path
-REPO_ROOT=Path(__file__).resolve().parents[1]
-BIN=os.environ.get('TEMPMAIL_TEST_BIN',str(REPO_ROOT/'backend/build/tempmail-server')); PORT=3152; BASE=f'http://127.0.0.1:{PORT}'
+BIN='/opt/tempmail/backend/build/tempmail-server'; PORT=3152; BASE=f'http://127.0.0.1:{PORT}'
 def call(p,m='GET',d=None,key=None):
  data=json.dumps(d).encode() if d is not None else None; h={'Content-Type':'application/json'} if d is not None else {}
  if key:h['X-API-Key']=key

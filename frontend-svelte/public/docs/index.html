@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="id" data-theme="system">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Dokumentasi API TempMail RouterSSH untuk membuat inbox sementara, membaca pesan, menunggu email baru, mengekstrak OTP, dan mengirim email." />
+  <meta name="theme-color" content="#f8f6f0" />
+  <title>Dokumentasi API · TempMail RouterSSH</title>
+  <link rel="icon" href="/tempmail-logo-orange.svg" />
+  <link rel="stylesheet" href="/docs/docs.css" />
+  <script>
+    (() => {
+      const saved = localStorage.getItem('tempmail.theme');
+      document.documentElement.dataset.theme = ['light', 'dark'].includes(saved) ? saved : 'system';
+    })();
+  </script>
+</head>
+<body>
+  <header class="docs-header">
+    <a class="brand" href="/" aria-label="Kembali ke TempMail">
+      <img src="/tempmail-logo-orange.svg" alt="" />
+      <span><strong><i>Temp</i>Mail</strong><small>Dokumentasi API</small></span>
+    </a>
+    <nav aria-label="Navigasi utama">
+      <a href="#quick-start">Mulai cepat</a>
+      <a href="#endpoints">Endpoint</a>
+      <a class="back-link" href="/">Buka aplikasi</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow"><span></span>API TempMail RouterSSH</p>
+        <h1>Inbox sementara untuk workflow otomatis.</h1>
+        <p>Buat alamat, tunggu email masuk, ambil OTP atau tautan verifikasi, lalu hapus inbox ketika selesai. Semua endpoint menggunakan JSON dan tersedia melalui HTTPS.</p>
+        <div class="base-url">
+          <span>Base URL</span>
+          <code>https://tempmail.routerssh.web.id/api</code>
+          <button type="button" data-copy="https://tempmail.routerssh.web.id/api" aria-label="Salin base URL">Salin</button>
+        </div>
+      </div>
+      <aside class="hero-note">
+        <span class="status"><i></i>API aktif</span>
+        <h2>Alur paling singkat</h2>
+        <ol>
+          <li><b>1</b><span>Buat alias dan simpan <code>api_key</code>.</span></li>
+          <li><b>2</b><span>Tunggu pesan lewat long polling.</span></li>
+          <li><b>3</b><span>Ambil isi pesan atau ekstrak OTP.</span></li>
+          <li><b>4</b><span>Hapus inbox setelah workflow selesai.</span></li>
+        </ol>
+      </aside>
+    </section>
+
+    <div class="docs-layout">
+      <aside class="sidebar">
+        <p>Panduan</p>
+        <a href="#authentication">Authentication</a>
+        <a href="#quick-start">Mulai cepat</a>
+        <a href="#lifecycle">Contoh lengkap</a>
+        <a href="#endpoints">Daftar endpoint</a>
+        <a href="#errors">Error handling</a>
+        <a href="#security">Penyimpanan key</a>
+      </aside>
+
+      <article class="content">
+        <section id="authentication">
+          <div class="section-heading"><span>01</span><div><p>Dasar</p><h2>Authentication</h2></div></div>
+          <p>Endpoint yang mengakses inbox memakai API key milik alias. Kirim key melalui header <code>X-API-Key</code>.</p>
+          <div class="callout">
+            <strong>Simpan key saat alias dibuat.</strong>
+            <p>Nilainya hanya dikembalikan oleh <code>POST /api/alias</code>. Jika hilang, inbox tidak dapat dibuka kembali melalui API.</p>
+          </div>
+          <div class="code-card">
+            <div class="code-head"><span>HTTP header</span><button type="button" data-copy="X-API-Key: temp-REPLACE_WITH_YOUR_KEY">Salin</button></div>
+            <pre><code>X-API-Key: temp-REPLACE_WITH_YOUR_KEY</code></pre>
+          </div>
+        </section>
+
+        <section id="quick-start">
+          <div class="section-heading"><span>02</span><div><p>5 langkah</p><h2>Mulai cepat dengan curl</h2></div></div>
+          <p>Contoh ini menggunakan placeholder. Jangan masukkan key produksi ke source code atau repository.</p>
+
+          <h3>1. Buat inbox</h3>
+          <div class="code-card">
+            <div class="code-head"><span>Shell</span><button type="button" data-copy-source="create-curl">Salin</button></div>
+            <pre id="create-curl"><code>curl -sS -X POST 'https://tempmail.routerssh.web.id/api/alias' \
+  -H 'Content-Type: application/json' \
+  -d '{"duration":"1h"}'</code></pre>
+          </div>
+          <p class="response-label">Response <span>200 OK</span></p>
+          <div class="code-card response">
+            <pre><code>{
+  "id": "ALIAS_ID",
+  "email": "random@routerssh.web.id",
+  "expires_at": "2030-01-01T01:00:00Z",
+  "api_key": "temp-REPLACE_WITH_YOUR_KEY"
+}</code></pre>
+          </div>
+
+          <h3>2. Tunggu email baru</h3>
+          <div class="code-card">
+            <div class="code-head"><span>Shell · long polling</span><button type="button" data-copy-source="wait-curl">Salin</button></div>
+            <pre id="wait-curl"><code>curl -sS 'https://tempmail.routerssh.web.id/api/wait?after=0&amp;timeout=30' \
+  -H 'X-API-Key: temp-REPLACE_WITH_YOUR_KEY'</code></pre>
+          </div>
+          <p>Server menunggu hingga 30 detik. Jika belum ada pesan, response adalah <code>408</code>; panggil lagi dengan retry yang dibatasi. Setelah menerima pesan, simpan <code>id</code> sebagai nilai <code>after</code> berikutnya.</p>
+
+          <h3>3. Ambil isi pesan</h3>
+          <div class="code-card">
+            <div class="code-head"><span>Shell</span><button type="button" data-copy-source="email-curl">Salin</button></div>
+            <pre id="email-curl"><code>curl -sS 'https://tempmail.routerssh.web.id/api/email/EMAIL_ID' \
+  -H 'X-API-Key: temp-REPLACE_WITH_YOUR_KEY'</code></pre>
+          </div>
+
+          <h3>4. Ekstrak OTP atau link</h3>
+          <div class="code-card">
+            <div class="code-head"><span>Shell</span><button type="button" data-copy-source="extract-curl">Salin</button></div>
+            <pre id="extract-curl"><code>curl -sS 'https://tempmail.routerssh.web.id/api/extract/EMAIL_ID' \
+  -H 'X-API-Key: temp-REPLACE_WITH_YOUR_KEY'</code></pre>
+          </div>
+
+          <h3>5. Hapus inbox</h3>
+          <div class="code-card">
+            <div class="code-head"><span>Shell</span><button type="button" data-copy-source="delete-curl">Salin</button></div>
+            <pre id="delete-curl"><code>curl -sS -X DELETE 'https://tempmail.routerssh.web.id/api/alias' \
+  -H 'X-API-Key: temp-REPLACE_WITH_YOUR_KEY'</code></pre>
+          </div>
+        </section>
+
+        <section id="lifecycle">
+          <div class="section-heading"><span>03</span><div><p>Implementasi</p><h2>Lifecycle lengkap</h2></div></div>
+          <div class="language-tabs" role="tablist" aria-label="Bahasa pemrograman">
+            <button type="button" role="tab" aria-selected="true" data-tab="javascript">JavaScript</button>
+            <button type="button" role="tab" aria-selected="false" data-tab="python">Python</button>
+          </div>
+
+          <div class="tab-panel" data-panel="javascript">
+            <div class="code-card">
+              <div class="code-head"><span>JavaScript · Node.js 18+</span><button type="button" data-copy-source="js-example">Salin</button></div>
+              <pre id="js-example"><code>const baseUrl = 'https://tempmail.routerssh.web.id/api';
+
+const aliasResponse = await fetch(`${baseUrl}/alias`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ duration: '1h' })
+});
+if (!aliasResponse.ok) throw new Error(`Create failed: ${aliasResponse.status}`);
+
+const alias = await aliasResponse.json();
+const headers = { 'X-API-Key': alias.api_key };
+let lastEmailId = 0;
+
+try {
+  while (true) {
+    const response = await fetch(
+      `${baseUrl}/wait?after=${lastEmailId}&amp;timeout=30`,
+      { headers }
+    );
+    if (response.status === 408) continue;
+    if (!response.ok) throw new Error(`Wait failed: ${response.status}`);
+
+    const email = await response.json();
+    lastEmailId = email.id;
+
+    const extractedResponse = await fetch(
+      `${baseUrl}/extract/${email.id}`,
+      { headers }
+    );
+    if (!extractedResponse.ok) {
+      throw new Error(`Extract failed: ${extractedResponse.status}`);
+    }
+
+    const extracted = await extractedResponse.json();
+    console.log({ address: alias.email, ...extracted });
+    break;
+  }
+} finally {
+  await fetch(`${baseUrl}/alias`, { method: 'DELETE', headers });
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="tab-panel" data-panel="python" hidden>
+            <div class="code-card">
+              <div class="code-head"><span>Python 3 · standard library</span><button type="button" data-copy-source="python-example">Salin</button></div>
+              <pre id="python-example"><code>import json
+import urllib.error
+import urllib.request
+
+BASE_URL = "https://tempmail.routerssh.web.id/api"
+
+
+def request(path, *, method="GET", api_key=None, body=None):
+    headers = {"Accept": "application/json"}
+    data = None
+    if api_key:
+        headers["X-API-Key"] = api_key
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(body).encode()
+    req = urllib.request.Request(
+        BASE_URL + path, data=data, headers=headers, method=method
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=135) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        payload = json.loads(error.read().decode())
+        return error.code, payload
+
+
+status, alias = request("/alias", method="POST", body={"duration": "1h"})
+if status != 200:
+    raise RuntimeError(alias)
+
+api_key = alias["api_key"]
+last_email_id = 0
+
+try:
+    while True:
+        status, email = request(
+            f"/wait?after={last_email_id}&amp;timeout=30", api_key=api_key
+        )
+        if status == 408:
+            continue
+        if status != 200:
+            raise RuntimeError(email)
+
+        last_email_id = email["id"]
+        status, extracted = request(
+            f"/extract/{last_email_id}", api_key=api_key
+        )
+        if status != 200:
+            raise RuntimeError(extracted)
+        print({"address": alias["email"], **extracted})
+        break
+finally:
+    request("/alias", method="DELETE", api_key=api_key)</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section id="endpoints">
+          <div class="section-heading"><span>04</span><div><p>Referensi</p><h2>Endpoint</h2></div></div>
+          <div class="endpoint-list">
+            <details open>
+              <summary><span class="method post">POST</span><code>/alias</code><b>Buat inbox</b></summary>
+              <div class="endpoint-body">
+                <p>Tidak memerlukan authentication. Body kosong membuat alias 24 jam. Untuk request JSON, gunakan:</p>
+                <ul><li><code>duration</code>: <code>1h</code>, <code>24h</code>, <code>7d</code>, <code>30d</code>, atau <code>forever</code>.</li><li><code>email</code>: opsional, nama lokal atau alamat lengkap pada domain <code>routerssh.web.id</code>.</li></ul>
+                <p>Response mengembalikan <code>id</code>, <code>email</code>, <code>expires_at</code>, dan <code>api_key</code>. Alias duplikat menghasilkan <code>409</code>.</p>
+              </div>
+            </details>
+
+            <details>
+              <summary><span class="method get">GET</span><code>/aliases</code><b>Detail alias</b></summary>
+              <div class="endpoint-body"><p>Memerlukan API key. Mengembalikan alias yang dimiliki key tersebut dalam object <code>{"aliases": [...]}</code>.</p></div>
+            </details>
+
+            <details>
+              <summary><span class="method get">GET</span><code>/messages</code><b>Daftar pesan</b></summary>
+              <div class="endpoint-body"><p>Endpoint automation yang direkomendasikan. Memerlukan API key dan tidak memerlukan alamat pada URL.</p><ul><li><code>after</code>: ID minimum, default <code>0</code>.</li><li><code>full=1</code>: sertakan <code>body_text</code> dan <code>body_html</code>.</li></ul><p>Tanpa <code>full</code>, response hanya memuat metadata pesan.</p></div>
+            </details>
+
+            <details>
+              <summary><span class="method get">GET</span><code>/email/:id</code><b>Isi satu pesan</b></summary>
+              <div class="endpoint-body"><p>Memerlukan API key yang memiliki pesan tersebut. Mengembalikan sender, recipient, subject, body text, body HTML, waktu masuk, dan status baca.</p></div>
+            </details>
+
+            <details>
+              <summary><span class="method get">GET</span><code>/wait</code><b>Tunggu pesan baru</b></summary>
+              <div class="endpoint-body"><p>Long polling berdasarkan alias milik API key.</p><ul><li><code>after</code>: ID pesan terakhir, default <code>0</code>.</li><li><code>timeout</code>: <code>1–120</code> detik, default <code>30</code>.</li></ul><p>Mengembalikan pesan paling lama yang belum diproses agar burst email tidak terlewat. Timeout normal menggunakan HTTP <code>408</code>.</p></div>
+            </details>
+
+            <details>
+              <summary><span class="method get">GET</span><code>/extract/:id</code><b>Ekstrak data</b></summary>
+              <div class="endpoint-body"><p>Mencari kode verifikasi 4–8 digit, link verifikasi, dan token pada email. Field <code>code</code>, <code>link</code>, atau <code>token</code> hanya muncul jika ditemukan.</p></div>
+            </details>
+
+            <details>
+              <summary><span class="method post">POST</span><code>/send</code><b>Kirim email</b></summary>
+              <div class="endpoint-body"><p>Memerlukan API key yang memiliki alamat <code>from</code>. Email dikirim sebagai plain text.</p><div class="mini-code"><code>{"from":"alias@routerssh.web.id","name":"Nama opsional","to":"tujuan@example.com","subject":"Subjek opsional","body":"Pesan wajib"}</code></div></div>
+            </details>
+
+            <details>
+              <summary><span class="method delete">DELETE</span><code>/alias</code><b>Hapus inbox</b></summary>
+              <div class="endpoint-body"><p>Memerlukan API key. Menghapus alias milik key beserta seluruh pesannya. Response: <code>{"success": true}</code>.</p></div>
+            </details>
+
+            <details>
+              <summary><span class="method delete">DELETE</span><code>/emails/:address</code><b>Kosongkan inbox</b></summary>
+              <div class="endpoint-body"><p>Memerlukan API key pemilik alamat. Alias tetap aktif, hanya semua pesan di dalamnya yang dihapus. Response menyertakan jumlah <code>deleted</code>.</p></div>
+            </details>
+
+            <details>
+              <summary><span class="method get">GET</span><code>/health</code><b>Status layanan</b></summary>
+              <div class="endpoint-body"><p>Tidak memerlukan authentication. Response sehat: <code>{"status":"ok","server":"tempmail-cpp"}</code>.</p></div>
+            </details>
+          </div>
+
+          <div class="compatibility-note">
+            <strong>Endpoint kompatibilitas browser</strong>
+            <p><code>GET /emails/:address</code>, <code>GET /check/:address</code>, <code>GET /wait/:address</code>, dan <code>DELETE /alias/:address</code> tetap tersedia. Untuk worker baru, gunakan <code>/messages</code>, <code>/wait</code>, dan <code>DELETE /alias</code> agar alamat tidak perlu dikirim di URL.</p>
+          </div>
+        </section>
+
+        <section id="errors">
+          <div class="section-heading"><span>05</span><div><p>Reliability</p><h2>Error handling</h2></div></div>
+          <div class="status-grid">
+            <article><b>400</b><span>Payload atau parameter tidak valid</span></article>
+            <article><b>401</b><span>API key tidak ada atau tidak valid</span></article>
+            <article><b>403</b><span>Key bukan pemilik alamat pengirim</span></article>
+            <article><b>404</b><span>Alias atau pesan tidak ditemukan</span></article>
+            <article><b>408</b><span>Long polling selesai tanpa pesan baru</span></article>
+            <article><b>409</b><span>Alias khusus sudah digunakan</span></article>
+            <article><b>500</b><span>Gangguan penyimpanan atau pengiriman</span></article>
+          </div>
+          <p>Retry <code>408</code> secara normal. Untuk <code>500</code> atau gangguan jaringan, gunakan bounded exponential backoff. Jangan retry <code>400</code>, <code>401</code>, <code>403</code>, atau <code>409</code> tanpa memperbaiki request.</p>
+        </section>
+
+        <section id="security">
+          <div class="section-heading"><span>06</span><div><p>Operasional</p><h2>Penyimpanan API key</h2></div></div>
+          <div class="security-grid">
+            <article><span>01</span><h3>Gunakan header</h3><p>Kirim key melalui <code>X-API-Key</code>, bukan query URL, agar tidak masuk ke history dan access log.</p></article>
+            <article><span>02</span><h3>Jangan commit</h3><p>Simpan key di environment variable atau secret manager. Jangan masukkan ke source, screenshot, atau log.</p></article>
+            <article><span>03</span><h3>Satu key, satu alias</h3><p>Setiap key hanya dapat membaca dan menghapus alias yang dimilikinya.</p></article>
+            <article><span>04</span><h3>Hapus setelah selesai</h3><p>Panggil <code>DELETE /alias</code> di blok cleanup atau <code>finally</code>.</p></article>
+          </div>
+        </section>
+      </article>
+    </div>
+  </main>
+
+  <footer class="docs-footer">
+    <span>TempMail · RouterSSH</span>
+    <span>Alamat sementara, gratis untuk semua orang.</span>
+  </footer>
+
+  <div class="toast" role="status" aria-live="polite">Disalin</div>
+  <script src="/docs/docs.js" defer></script>
+</body>
+</html>

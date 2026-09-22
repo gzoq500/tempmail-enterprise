@@ -1,0 +1,502 @@
+[
+  {
+    "path": "README.md",
+    "bytes": 10650,
+    "sha256": "b26dfc68ff8c6c3d152c816ad65d12096b4db36bb69d456ed6dfcc508abe2afa"
+  },
+  {
+    "path": "backend/CMakeLists.txt",
+    "bytes": 2797,
+    "sha256": "43c6364376c0052d82c41f378aedd1fabfbdb250db6e0eda1525154bc7840415"
+  },
+  {
+    "path": "backend/include/crypto.h",
+    "bytes": 2954,
+    "sha256": "bcf7a80e902247facf15a60dc10092e18869674c3a69ec416644526392d9145f"
+  },
+  {
+    "path": "backend/include/database.h",
+    "bytes": 2233,
+    "sha256": "37dfe5a36a543f2d80a9d14ae240c1eaf592a83c0b7153685769c458ebb80d93"
+  },
+  {
+    "path": "backend/include/email_parser.h",
+    "bytes": 819,
+    "sha256": "dc9373ae6944cde724112ba554ec9969dd555c02caceab4f085ec798b8a3eace"
+  },
+  {
+    "path": "backend/include/httplib.h",
+    "bytes": 705264,
+    "sha256": "4f7aba72d5aa55e933c1071285e19d0e6d84264496434a9e945c011e01be9646"
+  },
+  {
+    "path": "backend/include/json.hpp",
+    "bytes": 1028286,
+    "sha256": "cdac1413cd1e04cd7f174e97c48b9375681a4f6b2d6543ba22014e5d616f055a"
+  },
+  {
+    "path": "backend/include/server.h",
+    "bytes": 827,
+    "sha256": "43c14183ab44356a88e73813434327a4b496fe57e992e3f5b385d19ce047e9bb"
+  },
+  {
+    "path": "backend/src/crypto.cpp",
+    "bytes": 12551,
+    "sha256": "5c96d91c57920b4fe49a3a0ede6515fe95bebe27770622cfa8e8b3efd9bab8ad"
+  },
+  {
+    "path": "backend/src/database.cpp",
+    "bytes": 26995,
+    "sha256": "4ad4370b5cef49c532617724bd01b8b2f2775980be6373d37ff98df0ce5566af"
+  },
+  {
+    "path": "backend/src/email_parser.cpp",
+    "bytes": 19340,
+    "sha256": "21a35ddb34d5f5baeb156682f6670f2852c8ccfa6eb1eb180df19ce0e07dcbca"
+  },
+  {
+    "path": "backend/src/main.cpp",
+    "bytes": 2998,
+    "sha256": "f81a0c127552077e2eb7b204e3f77d8e7bf81a683789d6a32370c8367e92978c"
+  },
+  {
+    "path": "backend/src/server.cpp",
+    "bytes": 39759,
+    "sha256": "cee5cbd0b89211997bd859abf1077650ecf9546b66335248d77361f932887d99"
+  },
+  {
+    "path": "backend/third_party/kyber768/LICENSE",
+    "bytes": 210,
+    "sha256": "5d7798eec4d8c8ef0a72dfe805ec54dfd7b212d3928bf9695fda4095d22829ab"
+  },
+  {
+    "path": "backend/third_party/kyber768/api.h",
+    "bytes": 655,
+    "sha256": "1d19ed89d16fdb47254df9ebf24ab21de24af08079b8f205262c2d40ad634d18"
+  },
+  {
+    "path": "backend/third_party/kyber768/cbd.c",
+    "bytes": 2699,
+    "sha256": "c00b39d8a7a1523630976fb17bf6f23a2fe949465396976d45f49cba5ad3e9fa"
+  },
+  {
+    "path": "backend/third_party/kyber768/cbd.h",
+    "bytes": 336,
+    "sha256": "7310996b7838250b187627cb9da5cf2d1d0fe2abb966644e769237d93353f07d"
+  },
+  {
+    "path": "backend/third_party/kyber768/compat.h",
+    "bytes": 2501,
+    "sha256": "af180f65d6c77f4ee2745d12e2e9bf4d3917228e8a9bbd28dc351734f72840ff"
+  },
+  {
+    "path": "backend/third_party/kyber768/fips202.c",
+    "bytes": 29026,
+    "sha256": "4871baddebf2d4771d86b5088719123e2e43addce1a3c0eca75b4d18970ffc1f"
+  },
+  {
+    "path": "backend/third_party/kyber768/fips202.h",
+    "bytes": 5566,
+    "sha256": "bf99a54bc1988380418054a18bd5a14d059770e70c1aac23b6d9c914539168e0"
+  },
+  {
+    "path": "backend/third_party/kyber768/indcpa.c",
+    "bytes": 13045,
+    "sha256": "094209bf4ce8b2d857846c8378708156e1d37c1ed4ad90678ac95f4a5950614b"
+  },
+  {
+    "path": "backend/third_party/kyber768/indcpa.h",
+    "bytes": 991,
+    "sha256": "785e637c9a56d0b6a031a65548b8c3eea0b55777d1424e0c2da373b057758eb2"
+  },
+  {
+    "path": "backend/third_party/kyber768/kem.c",
+    "bytes": 6447,
+    "sha256": "f5f3f5c8c7646479923b7a978fa963d894e020917fbe9135812691b15f21f010"
+  },
+  {
+    "path": "backend/third_party/kyber768/kem.h",
+    "bytes": 956,
+    "sha256": "529e8d3ce89517489827fc3eef3339bab85176a13e6c5904e0f6ac2a2ef57aad"
+  },
+  {
+    "path": "backend/third_party/kyber768/ntt.c",
+    "bytes": 5451,
+    "sha256": "c8ef4f66d14f3e3bb40643d1f066d187d55a30008211ffcfbcfda022118c7b97"
+  },
+  {
+    "path": "backend/third_party/kyber768/ntt.h",
+    "bytes": 388,
+    "sha256": "d88d9713017aef62c08b248d14895420f386fdb064fc5112587c2d24575dc2ad"
+  },
+  {
+    "path": "backend/third_party/kyber768/params.h",
+    "bytes": 1108,
+    "sha256": "67af238b14774e430d933b1a2873834d98d5555f2b578e2765f25f94416adf8e"
+  },
+  {
+    "path": "backend/third_party/kyber768/poly.c",
+    "bytes": 11390,
+    "sha256": "94937bc6f82c7b57ee17d0c721780812d264be73fa0b2b83a79e2a9b690ddf05"
+  },
+  {
+    "path": "backend/third_party/kyber768/poly.h",
+    "bytes": 1542,
+    "sha256": "8367e5a190368435f6e234f4b6e4ace41bfd4b8c82377680b806077885b74c5d"
+  },
+  {
+    "path": "backend/third_party/kyber768/polyvec.c",
+    "bytes": 7261,
+    "sha256": "de5e2509f02d6e267fd0d834494c742e1964ae8defad853486bfe78ffec7acb2"
+  },
+  {
+    "path": "backend/third_party/kyber768/polyvec.h",
+    "bytes": 974,
+    "sha256": "85d706d8114d9697f5428f0da187a57ec67c7e626f50a4de48c693f653b2cf34"
+  },
+  {
+    "path": "backend/third_party/kyber768/randombytes.c",
+    "bytes": 10776,
+    "sha256": "892d5d9ea9f5623f863f170c829827e936bb96609fb11d7e53a3d8413f07f8c1"
+  },
+  {
+    "path": "backend/third_party/kyber768/randombytes.h",
+    "bytes": 450,
+    "sha256": "7ae401d4d5eeb41bfa738d1281d57da3f78f915ca94388d89f4f33cbe6a3fe1e"
+  },
+  {
+    "path": "backend/third_party/kyber768/reduce.c",
+    "bytes": 1390,
+    "sha256": "df8cc0ea0a9b357fc5649caba850baecaa260b166e89abf598e3ef52a79f06e9"
+  },
+  {
+    "path": "backend/third_party/kyber768/reduce.h",
+    "bytes": 323,
+    "sha256": "2e942c482bedfb126b3f38ba1f7e4f5c339c24773afd21ec8b5e2b8bacd2fe8a"
+  },
+  {
+    "path": "backend/third_party/kyber768/sp800-185.c",
+    "bytes": 5656,
+    "sha256": "17988eddc3378c0aff2ce01353fe71df7981d88b881030a06fdd9723fec58380"
+  },
+  {
+    "path": "backend/third_party/kyber768/sp800-185.h",
+    "bytes": 1385,
+    "sha256": "9b3007710558a8bbf25c6dfbf4d2fe6ef35b26eb615822e095debc0c0ca587ce"
+  },
+  {
+    "path": "backend/third_party/kyber768/symmetric-shake.c",
+    "bytes": 2910,
+    "sha256": "aea6e14d0e83429569cecc8cdddb4122ab5d3bf3dae83964c9daf5264fb62ac0"
+  },
+  {
+    "path": "backend/third_party/kyber768/symmetric.h",
+    "bytes": 1275,
+    "sha256": "a8c0a0d440fd9baf43a1be8d4ef64c275433f150e9ab76a037835e495f7fbe7e"
+  },
+  {
+    "path": "backend/third_party/kyber768/verify.c",
+    "bytes": 2219,
+    "sha256": "8b32c676ba3e7687cbfdf6e785f3be1a53323c5b3dbce6787a671917628cdf37"
+  },
+  {
+    "path": "backend/third_party/kyber768/verify.h",
+    "bytes": 396,
+    "sha256": "64e0ae3578f60a1da91179d8a413723c19730486ac13bfc58fddb402d8a82ec2"
+  },
+  {
+    "path": "backend/third_party/sqlite3.c",
+    "bytes": 9015946,
+    "sha256": "7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775"
+  },
+  {
+    "path": "backend/third_party/sqlite3.h",
+    "bytes": 640658,
+    "sha256": "0c207567adc631521a353e067cfbc5044ebf11868f3c3fbf3178d6990409740e"
+  },
+  {
+    "path": "deployment/Caddyfile.example",
+    "bytes": 483,
+    "sha256": "e9f7768dd07cef61c17c2474c9f5c89887fee1b7370e50cf5495a748f8c8a50d"
+  },
+  {
+    "path": "deployment/postfix-main.cf.example",
+    "bytes": 803,
+    "sha256": "674d2fecf841bcc0d0b50cae7fdc5d3e5996c8b9e0f202169c3e31308b91f082"
+  },
+  {
+    "path": "deployment/postfix-master.cf.example",
+    "bytes": 1793,
+    "sha256": "d302e9ba9ac7851791e58efa9be3ae0a8dac636f9229b16e12432ab3ce2c5fde"
+  },
+  {
+    "path": "deployment/tempmail-backend.service",
+    "bytes": 631,
+    "sha256": "274c048bb15073cef1d018f8777a15712adab6dbea8ff656ea8f332fda958901"
+  },
+  {
+    "path": "deployment/tempmail-handler",
+    "bytes": 3750,
+    "sha256": "16e5b1eb4ffde5fb9a3c78cef07275f6958311932aab4eb8a8290c4f900edd80"
+  },
+  {
+    "path": "frontend-svelte/dist/assets/bricolage-grotesque-latin-ext-wght-normal-CcLUaPy7.woff2",
+    "bytes": 18668,
+    "sha256": "e808f16b56f84dc7933e498cc8a41d4a5cd853adc6eef154584baa5de1008b15"
+  },
+  {
+    "path": "frontend-svelte/dist/assets/bricolage-grotesque-latin-wght-normal-DLoelf7F.woff2",
+    "bytes": 41344,
+    "sha256": "a97804dc9fbe5fc972a08018c5eda4dab7ef2346f64c57e61419d05e6de4ea1c"
+  },
+  {
+    "path": "frontend-svelte/dist/assets/bricolage-grotesque-vietnamese-wght-normal-BUzh504Q.woff2",
+    "bytes": 8608,
+    "sha256": "33ae5254fa09938c5abef5f1acaf848c0303aa21e3eb5632edb7d434deb3f572"
+  },
+  {
+    "path": "frontend-svelte/dist/assets/index-Bx1J0U2r.js",
+    "bytes": 68738,
+    "sha256": "63c6ac8db2371cbd613b4dd6608132a957114089a26089600cb2f08389b49bda"
+  },
+  {
+    "path": "frontend-svelte/dist/assets/index-CX3KwxRr.css",
+    "bytes": 40601,
+    "sha256": "91876ec2c38589bd34d0a2fea76cace1ead92277d8229d0b7c72f38c39ca1900"
+  },
+  {
+    "path": "frontend-svelte/dist/assets/manrope-cyrillic-wght-normal-Dvxsihut.woff2",
+    "bytes": 14500,
+    "sha256": "c268b459a9329e59fecf39a17618efd44c71735532048d60b12aab76a8c14914"
+  },
+  {
+    "path": "frontend-svelte/dist/assets/manrope-greek-wght-normal-DL7QRZyv.woff2",
+    "bytes": 9444,
+    "sha256": "2fb2e8cbfd52ae46179a8b6024eb162f1f9c6de3d22d6e3a30d8f395de7220be"
+  },
+  {
+    "path": "frontend-svelte/dist/assets/manrope-latin-ext-wght-normal-Ch3YOpNY.woff2",
+    "bytes": 15120,
+    "sha256": "3911b66d9f2e005a4b989223405d0e5032619c668597ba467cc76a23c8fffcfb"
+  },
+  {
+    "path": "frontend-svelte/dist/assets/manrope-latin-wght-normal-DHIcAJRg.woff2",
+    "bytes": 24836,
+    "sha256": "a30ddcd349703aff7464c34bef3fffdff405ee50c113440d7c8693c02d210972"
+  },
+  {
+    "path": "frontend-svelte/dist/assets/manrope-vietnamese-wght-normal-usUDDRr7.woff2",
+    "bytes": 8520,
+    "sha256": "6bbb044ab420e07edb0a3042d2eb314b85e83a0182e945a15ab3b9092668dfd5"
+  },
+  {
+    "path": "frontend-svelte/dist/docs/docs.css",
+    "bytes": 15085,
+    "sha256": "4f3b3694297bcc3554c2de1fa34289e7b74b6b0fbacf402c9baa85fd91286b9d"
+  },
+  {
+    "path": "frontend-svelte/dist/docs/docs.js",
+    "bytes": 1654,
+    "sha256": "5ee1d1df724651e8dd79749960ea09fd391cb4dd92cadfc004d6d9bfbdd48be4"
+  },
+  {
+    "path": "frontend-svelte/dist/docs/index.html",
+    "bytes": 17637,
+    "sha256": "164637343a12b0ae5cee3bacdc1015135b4aed66c1fe837df57bce13353131f0"
+  },
+  {
+    "path": "frontend-svelte/dist/docs/manrope.woff2",
+    "bytes": 24836,
+    "sha256": "a30ddcd349703aff7464c34bef3fffdff405ee50c113440d7c8693c02d210972"
+  },
+  {
+    "path": "frontend-svelte/dist/index.html",
+    "bytes": 1019,
+    "sha256": "5a1f635332d90fcc7a6f9582666fa91a2247e39772b4e4e80ac54e98cc558db3"
+  },
+  {
+    "path": "frontend-svelte/dist/tempmail-logo-orange.svg",
+    "bytes": 732,
+    "sha256": "7211125d216137753242f81aa5c2ab44c567e3de775835aea2ea146b2799b101"
+  },
+  {
+    "path": "frontend-svelte/dist/tempmail-logo.svg",
+    "bytes": 1623,
+    "sha256": "798663dc1fefcfb661fca5c3c278642422d61641bdf0a36a7c849018749aebc1"
+  },
+  {
+    "path": "frontend-svelte/index.html",
+    "bytes": 922,
+    "sha256": "c66cc955a7a1ef8ab3b243c8be99f47d0a27c6eb3b21993782ec0dceb34c46a9"
+  },
+  {
+    "path": "frontend-svelte/package-lock.json",
+    "bytes": 78158,
+    "sha256": "70c0ef17c6ea4c602fad60900481d6b22ccfea72fdd0c1eae634c442cdc5073a"
+  },
+  {
+    "path": "frontend-svelte/package.json",
+    "bytes": 484,
+    "sha256": "8808cce9daccd6337faa3a77335ea908df412db2135e090587a83de858a4816b"
+  },
+  {
+    "path": "frontend-svelte/postcss.config.js",
+    "bytes": 79,
+    "sha256": "082f9a07aae22ae329bfc652d405ba5a704cba1ee86f4b78c7c70f98d628a610"
+  },
+  {
+    "path": "frontend-svelte/public/docs/docs.css",
+    "bytes": 15085,
+    "sha256": "4f3b3694297bcc3554c2de1fa34289e7b74b6b0fbacf402c9baa85fd91286b9d"
+  },
+  {
+    "path": "frontend-svelte/public/docs/docs.js",
+    "bytes": 1654,
+    "sha256": "5ee1d1df724651e8dd79749960ea09fd391cb4dd92cadfc004d6d9bfbdd48be4"
+  },
+  {
+    "path": "frontend-svelte/public/docs/index.html",
+    "bytes": 17637,
+    "sha256": "164637343a12b0ae5cee3bacdc1015135b4aed66c1fe837df57bce13353131f0"
+  },
+  {
+    "path": "frontend-svelte/public/docs/manrope.woff2",
+    "bytes": 24836,
+    "sha256": "a30ddcd349703aff7464c34bef3fffdff405ee50c113440d7c8693c02d210972"
+  },
+  {
+    "path": "frontend-svelte/public/tempmail-logo-orange.svg",
+    "bytes": 732,
+    "sha256": "7211125d216137753242f81aa5c2ab44c567e3de775835aea2ea146b2799b101"
+  },
+  {
+    "path": "frontend-svelte/public/tempmail-logo.svg",
+    "bytes": 1623,
+    "sha256": "798663dc1fefcfb661fca5c3c278642422d61641bdf0a36a7c849018749aebc1"
+  },
+  {
+    "path": "frontend-svelte/src/App.svelte",
+    "bytes": 33240,
+    "sha256": "1aa7bdbb8269bbdbd67a00970cf72c93ae28be6b7cedae3de2d9e5ec7104ce3a"
+  },
+  {
+    "path": "frontend-svelte/src/app.css",
+    "bytes": 33504,
+    "sha256": "9eb40a628bfc92c93dd09815db32ab903f5faced708942ad6dbdc3dc28661194"
+  },
+  {
+    "path": "frontend-svelte/src/lib/api.ts",
+    "bytes": 6676,
+    "sha256": "bc9b0b90e8da4823e80d05cc2348e455ecf4d2defeee557f14557a4039c3bc22"
+  },
+  {
+    "path": "frontend-svelte/src/lib/helpers.ts",
+    "bytes": 4788,
+    "sha256": "327e2a1a760cb43f23216e650a271fdcce54cacb087d46446f9517ad9ffef68a"
+  },
+  {
+    "path": "frontend-svelte/src/lib/i18n.ts",
+    "bytes": 11040,
+    "sha256": "ee7d2a78fb18a1a8bbfac7a3d56dfc5c737fd13aecdf1ef6311886565c4887d7"
+  },
+  {
+    "path": "frontend-svelte/src/main.ts",
+    "bytes": 230,
+    "sha256": "86802a9e7ee9a9d339e34b03f338a5b798ab96f01cc2304d72361b87e494f690"
+  },
+  {
+    "path": "frontend-svelte/tailwind.config.js",
+    "bytes": 161,
+    "sha256": "015c905455745afe3fd33c3842440a9f93d6a1918ce77d10e111507a266ddcb0"
+  },
+  {
+    "path": "frontend-svelte/tsconfig.json",
+    "bytes": 388,
+    "sha256": "cfda003fd2b27e20097f8fa64d926bd5991883bd8221abb3f1c7826b56238c2e"
+  },
+  {
+    "path": "frontend-svelte/vite.config.js",
+    "bytes": 882,
+    "sha256": "98e37be2889f9cea36db9398304aff5849e4a661ddd67bc9a93e131c2f45cda3"
+  },
+  {
+    "path": "scripts/email-handler.sh",
+    "bytes": 1057,
+    "sha256": "9f29cd6d963b55d09c3e7ab3fca9fff7b345d4630b8ec2c52c3e8c385a14dc50"
+  },
+  {
+    "path": "systemd/tempmail-backend.service",
+    "bytes": 437,
+    "sha256": "45b215e3ad05892f86a12c6667b2d6c6aca2843b43016724640938b9c1ccdc46"
+  },
+  {
+    "path": "tests/api_key_tests.py",
+    "bytes": 4829,
+    "sha256": "7f35f6730dbed3ddd26d6121a397c27bf857b48e28d8b3e7d73c3521a5370478"
+  },
+  {
+    "path": "tests/cleanup_mime_boundaries.py",
+    "bytes": 993,
+    "sha256": "fb828d6f1f592a6d33c09331ca5979e7c16cd58b0a246421eda3729bf0b39955"
+  },
+  {
+    "path": "tests/crypto_ab.py",
+    "bytes": 3242,
+    "sha256": "545b1703be014455ac29bdc0be2e3ca95b53eb33d8b995a8aa5be38fbc47ab8c"
+  },
+  {
+    "path": "tests/crypto_compare.py",
+    "bytes": 4897,
+    "sha256": "e0c434910f7692e8236a62555758305a29449e2e15e8d9e3e69269f099ef1c99"
+  },
+  {
+    "path": "tests/crypto_unit_tests.py",
+    "bytes": 4664,
+    "sha256": "f2c16758ab466c08b8d608fa4ce73e3ef0bacb20b65960f58414ef11acad8e34"
+  },
+  {
+    "path": "tests/deep_audit.py",
+    "bytes": 6136,
+    "sha256": "994ca9eb255ba69817ca680d718958aa51a41d92309ac559fc22c3cdd1b58e52"
+  },
+  {
+    "path": "tests/flood_test.py",
+    "bytes": 5904,
+    "sha256": "23c5feadcce8fbf2d2a1fb64916b82ab3e17ca2257952734b5fea19daeeb0ab5"
+  },
+  {
+    "path": "tests/load_benchmark.py",
+    "bytes": 9387,
+    "sha256": "72e9bba50a9bae27a40d4749705aa94240c8266d4e59d52242c45b811bf05016"
+  },
+  {
+    "path": "tests/mime_deep_test.py",
+    "bytes": 3955,
+    "sha256": "346d9bb3a0f5c1e903534b4fbcda7bb5dc07ad04f6a3f949370f95f11ff9d365"
+  },
+  {
+    "path": "tests/open_inbox_e2e.py",
+    "bytes": 4149,
+    "sha256": "c8bf41a8157566438f78809281d146ae2bf381871bbc7bb31f709591f8e034db"
+  },
+  {
+    "path": "tests/profile_messages.py",
+    "bytes": 3280,
+    "sha256": "0e74cfe4d6450ec12c31568bfe2823e49fa4815b2f44cb43857c8aeca92c68ab"
+  },
+  {
+    "path": "tests/public_benchmark.py",
+    "bytes": 3699,
+    "sha256": "782a3c8efdec3ff5b55ae8dfc4c27dbf4a11f629c373238d00e86abdeda0b5fc"
+  },
+  {
+    "path": "tests/regression_tests.py",
+    "bytes": 6628,
+    "sha256": "d811ed9aacf7f85e26a636521dc6c1a09356d46308f9ec6ca24f35e56c89f989"
+  },
+  {
+    "path": "tests/reliability_deep_test.py",
+    "bytes": 3489,
+    "sha256": "f6d5b8a9666103223314b351221a71e3ca577baa086eef37659687024db5014f"
+  }
+]

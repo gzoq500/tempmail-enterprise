@@ -9,11 +9,9 @@ from __future__ import annotations
 import concurrent.futures, json, os, shutil, sqlite3, subprocess, tempfile, threading, time
 import urllib.error, urllib.request
 
-from pathlib import Path
-REPO_ROOT = Path(__file__).resolve().parents[1]
-BIN = os.environ.get("TEMPMAIL_TEST_BIN", str(REPO_ROOT / "backend/build/tempmail-server"))
-PROD_DB = os.environ.get("TEMPMAIL_TEST_DB", str(REPO_ROOT / "backend/data/tempmail.db"))
-PROD_KEYS = os.environ.get("TEMPMAIL_TEST_KEYS", str(REPO_ROOT / "backend/data/keys"))
+BIN = "/opt/tempmail/backend/build/tempmail-server"
+PROD_DB = "/opt/tempmail/backend/data/tempmail.db"
+PROD_KEYS = "/opt/tempmail/backend/data/keys"
 PORT = 3151
 BASE = f"http://127.0.0.1:{PORT}"
 
@@ -35,9 +33,7 @@ def req(path, method="GET", payload=None, key=None, timeout=10):
 def main():
     root=tempfile.mkdtemp(prefix="tm-deep-")
     db=f"{root}/tempmail.db"; keys=f"{root}/keys"
-    if os.path.exists(PROD_DB): shutil.copy2(PROD_DB, db)
-    if os.path.isdir(PROD_KEYS): shutil.copytree(PROD_KEYS, keys)
-    else: os.makedirs(keys)
+    shutil.copy2(PROD_DB,db); shutil.copytree(PROD_KEYS,keys)
     env=dict(os.environ,TEMPMAIL_DB=db,TEMPMAIL_KEY_DIR=keys)
     p=subprocess.Popen([BIN,"--port",str(PORT),"--domain","routerssh.web.id"],env=env,
                        stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)

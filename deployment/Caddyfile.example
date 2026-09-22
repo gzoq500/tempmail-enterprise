@@ -1,4 +1,4 @@
-tempmail.example.com {
+tempmail.routerssh.web.id {
 	encode zstd gzip
 
 	@api path /api/*
@@ -12,5 +12,11 @@ tempmail.example.com {
 	header @html Cache-Control "no-cache, must-revalidate"
 
 	root * /opt/tempmail/frontend-svelte/dist
+	file_server
+}
+
+mail.routerssh.web.id {
+	root * /var/lib/roundcube
+	php_fastcgi unix//run/php/php8.1-fpm.sock
 	file_server
 }
